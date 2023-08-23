@@ -48,7 +48,7 @@ main = do
   let runGhc' :: Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
       runGhc' action = reallyCatch $ runGhc (Just ghcRoot) action
   pprFun <- case pkg_names of
-    [] -> Exit.exitSuccess
+    [] -> Exit.die "Missing argument(s): one or more packages"
     first_package_name : _ -> runGhc' (getPprFun first_package_name) >>= either (fail . show) pure
   lst <- forM pkg_names $ \pkg_nm -> do
     unsafeInterleaveIO $ runGhc' (getDefinitions pkg_nm) >>= logErrors
