@@ -37,7 +37,6 @@ import GHC.IO.Unsafe (unsafeInterleaveIO)
 import qualified System.IO as IO
 import Data.Maybe (catMaybes)
 import qualified Control.Exception as Ex
-import qualified Control.Monad.Catch as E
 import GHC.Core.Multiplicity (scaledThing)
 import qualified Control.Monad.Catch
 import qualified Control.Exception
