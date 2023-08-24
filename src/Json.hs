@@ -6,8 +6,9 @@
 
 module Json
 ( FunctionType(..)
-, ModuleDeclarations(..)
-, DeclarationMapJson(..)
+, ModuleDeclarations(..), fmapModuleDeclarations
+, DeclarationMapJson(..), fmapDeclarationMapJson
+  -- * Util
 , streamPrintJsonList
   -- * Re-exports
 , Map, A.ToJSON
@@ -20,6 +21,7 @@ import Data.List (intersperse)
 import qualified Data.Aeson as A
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
+import qualified Data.Map as Map
 
 streamPrintJsonList
   :: A.ToJSON a
@@ -48,10 +50,30 @@ newtype ModuleDeclarations value = ModuleDeclarations
     -- ^ Map from module name to a map of function names to 'FunctionType'
   } deriving (Eq, Show, Ord, A.ToJSON, A.FromJSON)
 
+fmapModuleDeclarations
+  :: Ord b
+  => (a -> b)
+  -> ModuleDeclarations a
+  -> ModuleDeclarations b
+fmapModuleDeclarations f (ModuleDeclarations map') = ModuleDeclarations $
+  Map.mapKeys f (fmap (Map.mapKeys f . fmap (fmap f)) map')
+
 data DeclarationMapJson value = DeclarationMapJson
   { declarationMapJson_package :: value
   , declarationMapJson_moduleDeclarations :: ModuleDeclarations value
-  } deriving Generic
+  } deriving (Generic)
+
+fmapDeclarationMapJson
+  :: Ord b
+  => (a -> b)
+  -> DeclarationMapJson a
+  -> DeclarationMapJson b
+fmapDeclarationMapJson f dmj =
+  DeclarationMapJson
+    { declarationMapJson_package = f $ declarationMapJson_package dmj
+    , declarationMapJson_moduleDeclarations = fmapModuleDeclarations f $ declarationMapJson_moduleDeclarations dmj
+
+    }
 
 instance (A.ToJSONKey value, A.ToJSON value) => A.ToJSON (DeclarationMapJson value)
 instance (Ord value, A.FromJSONKey value, A.FromJSON value) => A.FromJSON (DeclarationMapJson value)
