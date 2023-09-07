@@ -61,7 +61,7 @@ fmapModuleDeclarations f (ModuleDeclarations map') = ModuleDeclarations $
 data DeclarationMapJson value = DeclarationMapJson
   { declarationMapJson_package :: value
   , declarationMapJson_moduleDeclarations :: ModuleDeclarations value
-  } deriving (Generic)
+  } deriving (Generic, Show)
 
 fmapDeclarationMapJson
   :: Ord b
