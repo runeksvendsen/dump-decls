@@ -142,7 +142,10 @@ reportModuleDecls unit_id modl_nm = do
 
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, Json.FunctionType (scaledThing arg) res)
+            [ let name = varName _id
+              in ( name
+                 , Json.FunctionType (scaledThing arg) res (show $ nameSrcSpan name)
+                 )
             | Just thing <- things
             , AnId _id <- [thing]
             , (arg, res) <- case splitFunTys $ varType _id of -- is it a function with exactly one argument?

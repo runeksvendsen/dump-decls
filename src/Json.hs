@@ -38,8 +38,9 @@ streamPrintJsonList jsonList =
     )
 
 data FunctionType value = FunctionType
-  { functionType_arg :: value
-  , functionType_ret :: value
+  { functionType_arg :: !value
+  , functionType_ret :: !value
+  , functionType_srcSpan :: !String -- TODO: doesn't belong here
   } deriving (Eq, Show, Ord, Functor, Generic)
 
 instance A.ToJSON value => A.ToJSON (FunctionType value)
