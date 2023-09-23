@@ -16,12 +16,12 @@ import GHC.Core.Type (splitFunTys, expandTypeSynonyms)
 import GHC.Driver.Ppr (showSDocForUser)
 import GHC.Unit.State (lookupUnitId, lookupPackageName)
 import GHC.Unit.Info (UnitInfo, unitExposedModules, unitId, PackageName(..))
-import GHC.Unit.Types (UnitId)
+import GHC.Unit.Types (UnitId, GenModule)
 import GHC.Data.FastString (fsLit)
 import GHC.Driver.Env (hsc_units)
 import GHC.Utils.Outputable hiding (sep, (<>))
 import GHC.Types.TyThing (tyThingParent_maybe)
-import GHC.Types.Name (nameOccName)
+import GHC.Types.Name (nameOccName, nameModule_maybe)
 import GHC.Types.Name.Occurrence (OccName)
 import GHC.Types.Var (varName, varType)
 import Data.Function (on)
@@ -53,6 +53,15 @@ main = do
     unsafeInterleaveIO $ runGhc' (getDefinitions pkg_nm) >>= logErrors
   Json.streamPrintJsonList $ map (declarationMapToJson pprFun) (catMaybes lst)
   where
+    lol :: DeclarationMap -> DeclarationMap
+    lol dm =
+      let p = declarationMap_package dm
+          map' = Map.filter (\map'' -> any (\(_, ft) -> Json.functionType_srcSpan ft /= show p) (Map.toList map'')) (declarationMap_moduleDeclarations dm)
+      in dm { declarationMap_moduleDeclarations = map' }
+
+-- functionType_srcSpan
+
+
     reallyCatch :: IO a -> IO (Either Control.Exception.SomeException a)
     reallyCatch ioAction =
       Control.Exception.catch
@@ -144,7 +153,7 @@ reportModuleDecls unit_id modl_nm = do
     let contents =
             [ let name = varName _id
               in ( name
-                 , Json.FunctionType (scaledThing arg) res (show $ nameSrcSpan name)
+                 , Json.FunctionType (scaledThing arg) res (show $ moduleUnit $ nameModule name)
                  )
             | Just thing <- things
             , AnId _id <- [thing]
@@ -205,3 +214,6 @@ declarationMapToJson pprFun dm =
         , queryQualifyPackage = const True
         , queryPromotionTick = const True
         }
+
+showGenModule :: GenModule Unit -> String
+showGenModule gm = show (moduleUnit gm, moduleName gm)
