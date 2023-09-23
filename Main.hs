@@ -31,6 +31,7 @@ import Prelude hiding ((<>))
 import Control.Monad (forM)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified System.Exit as Exit
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import GHC.IO.Unsafe (unsafeInterleaveIO)
@@ -131,11 +132,15 @@ reportModuleDecls unit_id modl_nm = do
       Nothing -> fail $ "Failed to find module: " -- ++ show modl
       Just mod_info -> return mod_info
 
-    let names = GHC.modInfoExports mod_info
-        sorted_names = sortBy (compare `on` nameOccName) names
+    let exportedNames = GHC.modInfoExports mod_info
+        topLevelDefs = GHC.modInfoTyThings mod_info
+        -- Filter off re-exports
+        originalExports = Set.fromList exportedNames `Set.intersection` topLevelDefs
+
+        sorted_names = sortBy (compare `on` nameOccName) (Set.toList originalExports)
 
         exported_occs :: [OccName]
-        exported_occs = map nameOccName names
+        exported_occs = map nameOccName (Set.toList originalExports)
 
         is_exported :: OccName -> Bool
         is_exported occ = occ `elem` exported_occs
