@@ -9,7 +9,7 @@ copyright:          (c) 2023 Ben Gamari
 
 library
     exposed-modules:  Json
-    build-depends:    base, containers, aeson, text, bytestring
+    build-depends:    base, containers, aeson, text, bytestring, deepseq
     hs-source-dirs:   src
     default-language: Haskell2010
     ghc-options:      -Wall

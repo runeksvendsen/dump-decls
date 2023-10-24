@@ -18,6 +18,7 @@ where
 import GHC.Generics (Generic)
 import Data.Map.Strict (Map)
 import Data.List (intersperse)
+import Control.DeepSeq (NFData)
 import qualified Data.Aeson as A
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -44,11 +45,12 @@ data FunctionType value = FunctionType
 
 instance A.ToJSON value => A.ToJSON (FunctionType value)
 instance A.FromJSON value => A.FromJSON (FunctionType value)
+instance NFData value => NFData (FunctionType value)
 
 newtype ModuleDeclarations value = ModuleDeclarations
   { moduleDeclarations_map :: Map value (Map value (FunctionType value))
     -- ^ Map from module name to a map of function names to 'FunctionType'
-  } deriving (Eq, Show, Ord, A.ToJSON, A.FromJSON)
+  } deriving (Eq, Show, Ord, A.ToJSON, A.FromJSON, NFData)
 
 fmapModuleDeclarations
   :: Ord b
@@ -62,6 +64,8 @@ data DeclarationMapJson value = DeclarationMapJson
   { declarationMapJson_package :: value
   , declarationMapJson_moduleDeclarations :: ModuleDeclarations value
   } deriving (Generic, Show)
+
+instance NFData a => NFData (DeclarationMapJson a)
 
 fmapDeclarationMapJson
   :: Ord b
