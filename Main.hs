@@ -1,17 +1,17 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveFunctor #-}
-
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Move guards forward" #-}
+{-# LANGUAGE BangPatterns #-}
 module Main
 ( main
 )
 where
 
+import Types
 import qualified Json
-
 import GHC
+import qualified GHC.Paths
 import GHC.Core.Type (splitFunTys, expandTypeSynonyms)
 import GHC.Driver.Ppr (showSDocForUser)
 import GHC.Unit.State (lookupUnitId, lookupPackageName)
@@ -31,21 +31,26 @@ import Prelude hiding ((<>))
 import Control.Monad (forM)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import qualified Data.List.NonEmpty as NE
 import qualified System.Exit as Exit
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import GHC.IO.Unsafe (unsafeInterleaveIO)
 import qualified System.IO as IO
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import qualified Control.Exception as Ex
 import GHC.Core.Multiplicity (scaledThing)
 import qualified Control.Monad.Catch
 import qualified Control.Exception
+import qualified Data.Bifunctor
+import GHC.Core.TyCo.Rep (Type(TyConApp))
+import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon)
+import GHC.Builtin.Names (listTyConKey, getUnique)
 
 main :: IO ()
 main = do
-  ghcRoot:pkg_names <- getArgs
+  pkg_names <- getArgs
   let runGhc' :: Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
-      runGhc' action = reallyCatch $ runGhc (Just ghcRoot) action
+      runGhc' action = reallyCatch $ runGhc (Just GHC.Paths.libdir) action
   pprFun <- case pkg_names of
     [] -> Exit.die "Missing argument(s): one or more packages"
     first_package_name : _ -> runGhc' (getPprFun first_package_name) >>= either (fail . show) pure
@@ -128,7 +133,7 @@ reportModuleDecls unit_id modl_nm = do
     modl <- GHC.lookupQualifiedModule (OtherPkg unit_id) modl_nm
     mb_mod_info <- GHC.getModuleInfo modl
     mod_info <- case mb_mod_info of
-      Nothing -> fail $ "Failed to find module: " -- ++ show modl
+      Nothing -> fail $ "Failed to find module: " ++ GHC.Utils.Outputable.showPprUnsafe modl
       Just mod_info -> return mod_info
 
     let names = GHC.modInfoExports mod_info
@@ -140,9 +145,27 @@ reportModuleDecls unit_id modl_nm = do
         is_exported :: OccName -> Bool
         is_exported occ = occ `elem` exported_occs
 
+        -- TODO: only works for "outer" types; e.g. "[Char]" but not "Maybe [Char]".
+        toBuiltinType :: Type -> BuiltinType Type
+        toBuiltinType !ty = case ty of
+          TyConApp tyCon (ty1:ty2:tyTail) -> -- tuple (of size >= 2)
+            let mBoxity -- 'Nothing' if it's not a tuple
+                  | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
+                  | isBoxedTupleTyCon tyCon = Just Types.Boxed
+                  | otherwise = Nothing
+            in fromMaybe (BuiltinType_Type ty) $ do
+              boxity <- mBoxity
+              pure $ BuiltinType_Tuple
+                boxity
+                (toBuiltinType ty1)
+                (NE.map toBuiltinType $ ty2 NE.:| tyTail)
+          TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> -- list
+            BuiltinType_List (toBuiltinType ty1)
+          _ -> BuiltinType_Type ty -- neither a tuple nor list
+
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, Json.FunctionType (scaledThing arg) res)
+            [ (varName _id, Json.FunctionType (toBuiltinType $ scaledThing arg) (toBuiltinType res))
             | Just thing <- things
             , AnId _id <- [thing]
             , (arg, res) <- case splitFunTys $ varType _id of -- is it a function with exactly one argument?
@@ -192,7 +215,6 @@ declarationMapToJson pprFun dm =
         , queryQualifyPackage = const False
         , queryPromotionTick = const True
         }
-      where
 
     fullyQualify :: NamePprCtx
     fullyQualify =

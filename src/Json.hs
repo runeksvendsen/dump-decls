@@ -1,6 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveFunctor #-}
 
@@ -23,6 +22,7 @@ import qualified Data.Aeson as A
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Map as Map
+import Types (BuiltinType)
 
 streamPrintJsonList
   :: A.ToJSON a
@@ -39,8 +39,8 @@ streamPrintJsonList jsonList =
     )
 
 data FunctionType value = FunctionType
-  { functionType_arg :: value
-  , functionType_ret :: value
+  { functionType_arg :: BuiltinType value
+  , functionType_ret :: BuiltinType value
   } deriving (Eq, Show, Ord, Functor, Generic)
 
 instance A.ToJSON value => A.ToJSON (FunctionType value)
