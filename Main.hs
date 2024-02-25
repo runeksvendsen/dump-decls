@@ -41,10 +41,10 @@ import qualified Control.Exception as Ex
 import GHC.Core.Multiplicity (scaledThing)
 import qualified Control.Monad.Catch
 import qualified Control.Exception
-import qualified Data.Bifunctor
 import GHC.Core.TyCo.Rep (Type(TyConApp))
 import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon)
 import GHC.Builtin.Names (listTyConKey, getUnique)
+import qualified Data.Text as T
 
 main :: IO ()
 main = do
@@ -94,12 +94,12 @@ setDFlags pkg_nm = do
       , "-fprint-explicit-foralls"
       ]
 
-getPprFun :: GhcMonad m => String -> m (SDoc -> String)
+getPprFun :: GhcMonad m => String -> m (SDoc -> T.Text)
 getPprFun pkg_nm = do
   dflags <- setDFlags pkg_nm
   unit_state <- hsc_units <$> getSession
   name_ppr_ctx <- GHC.getNamePprCtx
-  pure $ showSDocForUser dflags unit_state name_ppr_ctx
+  pure $ T.pack . showSDocForUser dflags unit_state name_ppr_ctx
 
 getDefinitions :: String -> Ghc (Maybe DeclarationMap)
 getDefinitions pkg_nm = do
@@ -185,9 +185,9 @@ data DeclarationMap = DeclarationMap
   }
 
 declarationMapToJson
-  :: (SDoc -> String)
+  :: (SDoc -> T.Text)
   -> DeclarationMap
-  -> Json.DeclarationMapJson String
+  -> Json.DeclarationMapJson T.Text
 declarationMapToJson pprFun dm =
   Json.DeclarationMapJson
     { Json.declarationMapJson_package = fullyQualify' $ declarationMap_package dm
@@ -204,7 +204,7 @@ declarationMapToJson pprFun dm =
     mapMap :: Ord k' => Map k a -> ((k, a) -> (k', a')) -> Map k' a'
     mapMap map' f = Map.fromList . map f . Map.toList $ map'
 
-    fullyQualify', noQualify' :: Outputable a => a -> String
+    fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . withUserStyle fullyQualify AllTheWay . ppr
     noQualify' = pprFun . withUserStyle noQualify AllTheWay . ppr
 
