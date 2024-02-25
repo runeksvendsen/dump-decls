@@ -17,7 +17,7 @@ import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
 import qualified Data.Text as T
 import Control.Applicative (empty, (<|>))
-import Data.Aeson.KeyMap ((!?))
+import qualified Compat.Aeson
 import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
 
@@ -87,7 +87,7 @@ instance A.FromJSON ty => A.FromJSON (BuiltinType ty) where
           -> (a -> A.Parser (BuiltinType ty))
           -> A.Parser (BuiltinType ty)
         parseKind o keyTxt mkType =
-          maybe empty (A.parseJSON >=> mkType) (o !? keyTxt)
+          maybe empty (A.parseJSON >=> mkType) (Compat.Aeson.lookup keyTxt o)
 
         tupleFromList boxity = \case
           ty1:ty2:tyTail ->
