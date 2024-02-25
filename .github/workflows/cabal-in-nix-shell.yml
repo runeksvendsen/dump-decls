@@ -51,4 +51,5 @@ jobs:
         run: nix-shell ${{ matrix.nixShell }} --run "cabal build lib:dump-decls"
 
       - name: Build 'dump-decls' executable
+        if: ${{ matrix.nixShell }} == 'shell.nix' # exe only builds with GHC 9.6.2 currently
         run: nix-shell ${{ matrix.nixShell }} --run "cabal build exe:dump-decls"
