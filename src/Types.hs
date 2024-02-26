@@ -83,7 +83,7 @@ instance A.FromJSON ty => A.FromJSON (BuiltinType ty) where
         parseKind
           :: A.FromJSON a
           => A.Object
-          -> A.Key
+          -> Compat.Aeson.Key
           -> (a -> A.Parser (BuiltinType ty))
           -> A.Parser (BuiltinType ty)
         parseKind o keyTxt mkType =

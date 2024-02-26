@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP #-}
 module Compat.Aeson
 ( lookup
+, Key
 )
 where
 
@@ -12,6 +13,7 @@ import qualified Data.Aeson.KeyMap as Lookup
 import Data.Aeson.Key (Key)
 #else
 import qualified Data.HashMap.Strict as Lookup
+import qualified Data.Text as T
 type Key = T.Text
 #endif
 

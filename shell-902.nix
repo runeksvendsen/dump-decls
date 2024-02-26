@@ -5,4 +5,8 @@ pkgs.mkShell {
     pkgsUnstable.cabal-install
     pkgs.git
   ];
+
+  shellHook = ''
+    export CABAL_PROJECT_FILE="cabal-902.project"
+  '';
 }

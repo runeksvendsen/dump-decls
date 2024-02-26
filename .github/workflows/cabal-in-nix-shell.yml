@@ -45,11 +45,11 @@ jobs:
         run: nix-shell ${{ matrix.nixShell }} --run "echo 'it works \o/'"
 
       - name: Run 'cabal update'
-        run: nix-shell ${{ matrix.nixShell }} --run "cabal update"
+        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE update'
 
       - name: Build 'dump-decls' library
-        run: nix-shell ${{ matrix.nixShell }} --run "cabal build lib:dump-decls"
+        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE build lib:dump-decls'
 
       - name: Build 'dump-decls' executable
         # exe only builds with GHC 9.6.2 currently
-        run: if [[ "${{ matrix.nixShell }}" == "shell.nix" ]]; then nix-shell "${{ matrix.nixShell }}" --run "cabal build exe:dump-decls"; else echo "Not building exe for shell file ${{ matrix.nixShell }}"; fi
+        run: if [[ "${{ matrix.nixShell }}" == "shell.nix" ]]; then nix-shell "${{ matrix.nixShell }}" --run 'cabal --project-file=$CABAL_PROJECT_FILE build exe:dump-decls'; else echo "Not building exe for shell file ${{ matrix.nixShell }}"; fi
