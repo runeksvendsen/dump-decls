@@ -31,8 +31,8 @@ jobs:
             ~/.cabal/packages
             ~/.cabal/store
             dist-newstyle
-          key: ${{ runner.os }}-${{ hashFiles('**/*.cabal', '**/cabal.project', '**/cabal.project.freeze') }}-${{ matrix.nixShell }}
-          restore-keys: ${{ runner.os }}-
+          key: ${{ runner.os }}-${{ matrix.os }}-${{ hashFiles('**/*.cabal', '**/cabal.project', '**/cabal.project.freeze') }}-${{ matrix.nixShell }}
+          restore-keys: ${{ runner.os }}-${{ matrix.os }}-
 
       # Fixes error:
       #   Detected Bash version that isn't supported by Nixpkgs (3.2.57(1)-release)
