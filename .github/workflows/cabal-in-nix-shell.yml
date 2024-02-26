@@ -42,7 +42,7 @@ jobs:
           nix-env -i --from-expression '_: (import ./nix/pkgs.nix).pkgs.bash'
 
       - name: Test nix-shell
-        run: nix-shell ${{ matrix.nixShell }} --run "ls -l $(which ghc); ls -l $(which cabal); ghc --version; cabal --version; type cabal"
+        run: nix-shell ${{ matrix.nixShell }} --run 'echo $PATH; ls -l $(which ghc); ls -l $(which cabal); ghc --version; cabal --version; type cabal'
 
       - name: Run 'cabal update'
         run: nix-shell ${{ matrix.nixShell }} --run 'cabal -v update'
