@@ -7,7 +7,7 @@ pkgs.mkShell {
   ];
 
   shellHook = ''
-    shopt -s expand_aliases # Expand aliases in non-interactive shells. Cf. https://github.com/actions/toolkit/issues/766#issuecomment-928305811
+    shopt -s expand_aliases # Expand aliases in non-interactive shells. Makes sure aliases work in CI.
     alias cabal='cabal --project-file=cabal.project'
     export PATH="$(pwd)/hls":$PATH
   '';
