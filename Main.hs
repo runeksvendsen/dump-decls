@@ -12,7 +12,7 @@ import Types
 import qualified Json
 import GHC
 import qualified GHC.Paths
-import GHC.Core.Type (splitFunTys, expandTypeSynonyms)
+import GHC.Core.Type (splitFunTys, expandTypeSynonyms, tcSplitTyConApp_maybe)
 import GHC.Driver.Ppr (showSDocForUser)
 import GHC.Unit.State (lookupUnitId, lookupPackageName)
 import GHC.Unit.Info (UnitInfo, unitExposedModules, unitId, PackageName(..))
@@ -45,6 +45,8 @@ import GHC.Core.TyCo.Rep (Type(TyConApp))
 import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon)
 import GHC.Builtin.Names (listTyConKey, getUnique)
 import qualified Data.Text as T
+import Data.Bifunctor (bimap)
+import Debug.Trace (trace)
 
 main :: IO ()
 main = do
@@ -145,27 +147,9 @@ reportModuleDecls unit_id modl_nm = do
         is_exported :: OccName -> Bool
         is_exported occ = occ `elem` exported_occs
 
-        -- TODO: only works for "outer" types; e.g. "[Char]" but not "Maybe [Char]".
-        toBuiltinType :: Type -> BuiltinType Type
-        toBuiltinType !ty = case ty of
-          TyConApp tyCon (ty1:ty2:tyTail) -> -- tuple (of size >= 2)
-            let mBoxity -- 'Nothing' if it's not a tuple
-                  | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
-                  | isBoxedTupleTyCon tyCon = Just Types.Boxed
-                  | otherwise = Nothing
-            in fromMaybe (BuiltinType_Type ty) $ do
-              boxity <- mBoxity
-              pure $ BuiltinType_Tuple
-                boxity
-                (toBuiltinType ty1)
-                (NE.map toBuiltinType $ ty2 NE.:| tyTail)
-          TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> -- list
-            BuiltinType_List (toBuiltinType ty1)
-          _ -> BuiltinType_Type ty -- neither a tuple nor list
-
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, Json.FunctionType (toBuiltinType $ scaledThing arg) (toBuiltinType res))
+            [ (varName _id, Json.FunctionType (scaledThing arg) res)
             | Just thing <- things
             , AnId _id <- [thing]
             , (arg, res) <- case splitFunTys $ varType _id of -- is it a function with exactly one argument?
@@ -194,15 +178,29 @@ declarationMapToJson pprFun dm =
     , Json.declarationMapJson_moduleDeclarations = Json.ModuleDeclarations $
         mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
           ( fullyQualify' modName
-          , mapMap nameMap $ \(name, funType) ->
-              ( noQualify' name
-              , fmap (fullyQualify' . expandTypeSynonyms) funType
-              )
+          , mapMap nameMap $ bimap noQualify' funtionTypeToTypeInfo
           )
     }
   where
     mapMap :: Ord k' => Map k a -> ((k, a) -> (k', a')) -> Map k' a'
     mapMap map' f = Map.fromList . map f . Map.toList $ map'
+
+    trace_ ty tyRet =
+      let ppr_ :: Outputable a => a -> String
+          ppr_ = T.unpack . fullyQualify'
+      in case tcSplitTyConApp_maybe ty of
+            Just (_, []) -> tyRet
+            other -> ( ppr_ ty ++ " `tcSplitTyConApp_maybe` " ++ ppr_ other) `trace` tyRet
+
+    funtionTypeToTypeInfo :: Json.FunctionType Type -> Json.TypeInfo T.Text T.Text
+    funtionTypeToTypeInfo funType = Json.TypeInfo
+      { Json.typeInfo_fullyQualified =
+          bimap fullyQualify' fullyQualify' . toBuiltinType . expandTypeSynonyms . trace_ (Json.functionType_arg funType) <$> funType
+      , Json.typeInfo_unqualified =
+          bimap noQualify' noQualify' . toBuiltinType . expandTypeSynonyms <$> funType
+      , Json.typeInfo_tmpUnexpanded =
+          bimap fullyQualify' fullyQualify' . toBuiltinType <$> funType
+      }
 
     fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . withUserStyle fullyQualify AllTheWay . ppr
@@ -224,3 +222,21 @@ declarationMapToJson pprFun dm =
         , queryQualifyPackage = const True
         , queryPromotionTick = const True
         }
+
+-- TODO: tcSplitTyConApp_maybe
+toBuiltinType :: Type -> BuiltinType TyCon Type
+toBuiltinType !ty = case ty of
+  TyConApp tyCon (ty1:ty2:tyTail) -> -- tuple (of size >= 2)
+    let mBoxity -- 'Nothing' if it's not a tuple
+          | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
+          | isBoxedTupleTyCon tyCon = Just Types.Boxed
+          | otherwise = Nothing
+    in fromMaybe (BuiltinType_Type tycon tyList) $ do
+      boxity <- mBoxity
+      pure $ BuiltinType_Tuple
+        boxity
+        (toBuiltinType ty1)
+        (NE.map toBuiltinType $ ty2 NE.:| tyTail)
+  TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> -- list
+    BuiltinType_List (toBuiltinType ty1)
+  _ -> BuiltinType_Type tycon tyList -- neither a tuple nor list

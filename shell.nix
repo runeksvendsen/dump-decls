@@ -8,5 +8,6 @@ pkgs.mkShell {
 
   shellHook = ''
     export CABAL_PROJECT_FILE="cabal.project"
+    export PATH="$(pwd)/hls":$PATH
   '';
 }
