@@ -80,7 +80,7 @@ instance A.FromJSON Boxity where
 instance (A.ToJSON ty, A.ToJSON tycon) => A.ToJSON (BuiltinType tycon ty) where
   toJSON = \case
     BuiltinType_Type tycon tyList -> A.object
-      [("type", A.toJSON [("tycon" :: A.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
+      [("type", A.toJSON [("tycon" :: Compat.Aeson.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
     BuiltinType_List bty -> A.object
       [("list", A.toJSON bty)]
     BuiltinType_Tuple boxity bty neBty ->
