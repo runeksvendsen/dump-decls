@@ -153,7 +153,7 @@ reportModuleDecls pprFun unit_id modl_nm = do
             [ (varName _id, Json.FunctionType (scaledThing arg) res)
             | Just thing <- things
             , AnId _id <- [thing]
-            , (arg, res) <- case splitFunTys $ traceP $ varType _id of -- is it a function with exactly one argument?
+            , (arg, res) <- case splitFunTys $ traceP (varName _id) $ varType _id of -- is it a function with exactly one argument?
                 ([arg], res) -> [(arg, res)]
                 (_, _) -> []
             , case tyThingParent_maybe thing of
@@ -163,7 +163,10 @@ reportModuleDecls pprFun unit_id modl_nm = do
             ]
     pure $ Map.fromList contents
   where
-    traceP ty = trace_ ppr_ ty ty
+    traceP name ty = trace_ (ppr2 name ty) ty ty
+
+    ppr2 :: Name -> Type -> Type -> String
+    ppr2 name origTy subTy = ppr_ name ++ ": " ++ ppr_ origTy ++ ": " ++ ppr_ subTy
 
     ppr_ :: Outputable a => a -> String
     ppr_ = T.unpack . fullyQualify'
