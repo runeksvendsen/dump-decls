@@ -166,7 +166,7 @@ reportModuleDecls pprFun unit_id modl_nm = do
     traceP name ty = trace_ (ppr2 name ty) ty ty
 
     ppr2 :: Name -> Type -> Type -> String
-    ppr2 name origTy subTy = ppr_ name ++ ": \"" ++ ppr_ subTy ++ "\" in \"" ++ ppr_ origTy ++ "\""
+    ppr2 name origTy subTy = ppr_ name ++ ",\"" ++ ppr_ subTy ++ "\",\"" ++ ppr_ origTy ++ "\""
 
     ppr_ :: Outputable a => a -> String
     ppr_ = T.unpack . fullyQualify'
@@ -224,7 +224,7 @@ trace_ ppr_ ty tyRet =
         Just _ -> ty'
         -- Just (tc, []) -> ty'
         -- Just (tc, lst) -> ( "TMP_DEBUG TC " ++ ppr_ ty') `trace` ty'
-        Nothing -> ( "TMP_DEBUG Nothing: " ++ typeConsActual ty' ++ " " ++ ppr_ ty') `trace` ty'
+        Nothing -> ( "TMP_DEBUG Nothing: " ++ typeConsActual ty' ++ "," ++ ppr_ ty') `trace` ty'
 
       f' ty_ = case ty_ of
         AppTy _ _ -> ( "TMP_DEBUG: " ++ ppr_ ty_) `trace` ty_
