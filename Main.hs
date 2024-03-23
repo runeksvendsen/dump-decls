@@ -166,7 +166,7 @@ reportModuleDecls pprFun unit_id modl_nm = do
     traceP name ty = trace_ (ppr2 name ty) ty ty
 
     ppr2 :: Name -> Type -> Type -> String
-    ppr2 name origTy subTy = ppr_ name ++ ": " ++ ppr_ origTy ++ ": " ++ ppr_ subTy
+    ppr2 name origTy subTy = ppr_ name ++ ": \"" ++ ppr_ subTy ++ "\" in \"" ++ ppr_ origTy ++ "\""
 
     ppr_ :: Outputable a => a -> String
     ppr_ = T.unpack . fullyQualify'
