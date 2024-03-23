@@ -221,12 +221,12 @@ trace_ ppr_ ty tyRet =
         Just _ -> ty'
         -- Just (tc, []) -> ty'
         -- Just (tc, lst) -> ( "TMP_DEBUG TC " ++ ppr_ ty') `trace` ty'
-        Nothing -> ( "TMP_DEBUG Nothing: " ++ ppr_ ty') `trace` ty'
+        Nothing -> ( "TMP_DEBUG Nothing: " ++ typeConsActual ty ++ " " ++ ppr_ ty') `trace` ty'
 
       f' ty_ = case ty_ of
-        AppTy ty1 ty2 -> ( "TMP_DEBUG: " ++ ppr_ ty_) `trace` ty_
+        AppTy _ _ -> ( "TMP_DEBUG: " ++ ppr_ ty_) `trace` ty_
         _ -> ty_
-  in traceType f' ty `seq` tyRet
+  in traceType f ty `seq` tyRet
 
 
 fullyQualify :: Outputable a => a -> SDoc
@@ -286,15 +286,28 @@ traceType ppr_ initTy =
   let go !ty' = case ty' of
         TyVarTy _var -> ty'
         AppTy ty1 ty2 ->
-          let tyList = [ty1, ty2] in map ppr_ tyList `seq` map go tyList `seq` ty'
+          -- let tyList = [ty1, ty2] in map ppr_ tyList `seq` map go tyList `seq` ty'
+          ppr_ ty1 `seq` ppr_ ty2 `seq` go ty1 `seq` go ty2 `seq` ty'
         TyConApp _tyCon tyList ->
           map ppr_ tyList `seq` map go tyList `seq` ty'
         ForAllTy _forAllTyBinder ty ->
           ppr_ ty `seq` go ty `seq` ty'
-        FunTy _af _mult arg res ->
-          let tyList = [arg, res] in map ppr_ tyList `seq` map go tyList `seq` ty'
+        FunTy _af _mult ty1 ty2 ->
+          ppr_ ty1 `seq` ppr_ ty2 `seq` go ty1 `seq` go ty2 `seq` ty'
         LitTy _tyLit -> ty'
         CastTy ty _kindCoercion ->
           ppr_ ty `seq` go ty `seq` ty'
         CoercionTy _coercion  -> ty'
   in ppr_ initTy `seq` go initTy
+
+typeConsActual :: Type -> String
+typeConsActual ty' =
+  case ty' of
+    TyVarTy _var -> "TyVarTy"
+    AppTy ty1 ty2 -> "AppTy"
+    TyConApp _tyCon tyList -> "TyConApp"
+    ForAllTy _forAllTyBinder ty -> "ForAllTy"
+    FunTy _af _mult ty1 ty2 -> "FunTy"
+    LitTy _tyLit -> "LitTy"
+    CastTy ty _kindCoercion -> "CastTy"
+    CoercionTy _coercion  -> "CoercionTy"
