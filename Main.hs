@@ -150,7 +150,7 @@ reportModuleDecls pprFun unit_id modl_nm = do
 
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, Json.FunctionType (newTraceType $ scaledThing arg) (newTraceType res))
+            [ (varName _id, Json.FunctionType (newTraceType (varName _id) $ scaledThing arg) (newTraceType (varName _id) res))
             | Just thing <- things
             , AnId _id <- [thing]
             , (arg, res) <- case splitFunTys $ varType _id of -- is it a function with exactly one argument?
@@ -163,9 +163,10 @@ reportModuleDecls pprFun unit_id modl_nm = do
             ]
     pure $ Map.fromList contents
   where
-    newTraceType ty' = case tcSplitTyConApp_maybe ty' of
+    newTraceType :: Name -> Type -> Type
+    newTraceType name ty' = case tcSplitTyConApp_maybe ty' of
       Just _ -> ty'
-      Nothing -> ( "TMP_DEBUG: " ++ typeConsActual ty' ++ " " ++ ppr_ ty') `trace` ty'
+      Nothing -> ( "TMP_DEBUG: " ++ typeConsActual ty' ++ ": " ++ ppr_ name ++ ": " ++ ppr_ ty') `trace` ty'
 
     traceP name ty = trace_ (ppr2 name ty) ty ty
 
