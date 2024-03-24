@@ -150,10 +150,10 @@ reportModuleDecls pprFun unit_id modl_nm = do
 
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, Json.FunctionType (scaledThing arg) res)
+            [ (varName _id, Json.FunctionType (newTraceType $ scaledThing arg) (newTraceType res))
             | Just thing <- things
             , AnId _id <- [thing]
-            , (arg, res) <- case splitFunTys $ traceP (varName _id) $ varType _id of -- is it a function with exactly one argument?
+            , (arg, res) <- case splitFunTys $ varType _id of -- is it a function with exactly one argument?
                 ([arg], res) -> [(arg, res)]
                 (_, _) -> []
             , case tyThingParent_maybe thing of
@@ -163,6 +163,10 @@ reportModuleDecls pprFun unit_id modl_nm = do
             ]
     pure $ Map.fromList contents
   where
+    newTraceType ty' = case tcSplitTyConApp_maybe ty' of
+      Just _ -> ty'
+      Nothing -> ( "TMP_DEBUG: " ++ typeConsActual ty' ++ " " ++ ppr_ ty') `trace` ty'
+
     traceP name ty = trace_ (ppr2 name ty) ty ty
 
     ppr2 :: Name -> Type -> Type -> String
