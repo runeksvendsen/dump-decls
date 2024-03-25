@@ -229,7 +229,7 @@ trace_ ppr_ ty tyRet =
         Just _ -> ty'
         -- Just (tc, []) -> ty'
         -- Just (tc, lst) -> ( "TMP_DEBUG TC " ++ ppr_ ty') `trace` ty'
-        Nothing -> ( "TMP_DEBUG Nothing: " ++ typeConsActual ty' ++ "," ++ ppr_ ty') `trace` ty'
+        Nothing -> ( "TMP_DEBUG Nothing: " ++ typeConsActual (expandTypeSynonyms ty') ++ "," ++ ppr_ ty') `trace` ty'
 
       f' ty_ = case ty_ of
         AppTy _ _ -> ( "TMP_DEBUG: " ++ ppr_ ty_) `trace` ty_
