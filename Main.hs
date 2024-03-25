@@ -225,11 +225,10 @@ declarationMapToJson pprFun dm =
 
 trace_ ppr_ ty tyRet =
   let
-      f ty' = case tcSplitTyConApp_maybe ty' of
-        Just _ -> ty'
-        -- Just (tc, []) -> ty'
-        -- Just (tc, lst) -> ( "TMP_DEBUG TC " ++ ppr_ ty') `trace` ty'
-        Nothing -> ( "TMP_DEBUG Nothing: " ++ typeConsActual (expandTypeSynonyms ty') ++ "," ++ ppr_ ty') `trace` ty'
+      f ty' = case ty' of
+        TyConApp tyCon _tyList ->
+          ( "TMP_DEBUG Nothing " ++ if isTypeSynonymTyCon tyCon then "(synonym): " else ": " ++ typeConsActual (expandTypeSynonyms ty') ++ ", " ++ ppr_ ty') `trace` ty'
+        _ -> ty'
 
       f' ty_ = case ty_ of
         AppTy _ _ -> ( "TMP_DEBUG: " ++ ppr_ ty_) `trace` ty_
