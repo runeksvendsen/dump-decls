@@ -231,8 +231,7 @@ trace_ ppr_ ty tyRet =
       f' ty_ = case ty_ of
         AppTy _ _ -> ( "TMP_DEBUG: " ++ ppr_ ty_) `trace` ty_
         _ -> ty_
-  in traceType f ty `seq` tyRet
-
+  in f ty `seq` tyRet
 
 fullyQualify :: Outputable a => a -> SDoc
 fullyQualify =
