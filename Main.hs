@@ -164,9 +164,7 @@ reportModuleDecls pprFun unit_id modl_nm = do
     pure $ Map.fromList contents
   where
     newTraceType :: Name -> Type -> Type
-    newTraceType name ty' = case tcSplitTyConApp_maybe ty' of
-      Just _ -> ty'
-      Nothing -> ( "TMP_DEBUG: " ++ typeConsActual ty' ++ ": " ++ ppr_ name ++ ": " ++ ppr_ ty') `trace` ty'
+    newTraceType = traceP
 
     traceP name ty = trace_ (ppr2 name ty) ty ty
 
