@@ -24,9 +24,6 @@ import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
 import Data.Bifunctor (Bifunctor(..))
 
-type Test tycon ty
-  = BuiltinType tycon ty
-
 -- | Types supported by /Haskell Function Graph/.
 --
 --   Currently, only type constructors applications are supported,
@@ -34,11 +31,7 @@ type Test tycon ty
 --
 --   More will be added later, probably.
 data FgType tycon ty
-  = FgType_TyConApp tycon ty
-
--- | Either just a type, a list or a tuple
-data BuiltinType tycon ty
-  = BuiltinType_Type
+  = FgType_TyConApp
     -- ^ A type consisting of (1) a type constructor,
     -- and (2) the types to which the constructor is applied.
       tycon
@@ -47,25 +40,39 @@ data BuiltinType tycon ty
       -- E.g. 'Maybe', 'Either', 'IO', 'Map'.
       -- Note that this is never the list nor tuple type constructor as they're
       --  handled by 'BuiltinType_List' and 'BuiltinType_Tuple', respectively.
-      [BuiltinType tycon ty]
+      [ty]
       -- ^ Arguments to the type constructor.
       -- The empty list if the type constructor does not take any arguments
       --  (e.g. 'Int', 'Char', 'Text') and otherwise one type for all type variables
       --  of the type constructor (since we're only looking at the types of functions
       --  exported from a module where a partially applied type constructor is invalid).
+    deriving (Eq, Show, Ord, Generic)
+
+-- | Either just a type, a list or a tuple
+data BuiltinType tycon ty
+  = BuiltinType_Type (FgType tycon (BuiltinType tycon ty))
+  -- ^ A type that's neither a list nor a tuple
   | BuiltinType_List (BuiltinType tycon ty)
   -- ^ A list
   | BuiltinType_Tuple Boxity (BuiltinType tycon ty) (NE.NonEmpty (BuiltinType tycon ty))
   -- ^ A tuple of size @1 + length nonEmptyList@
     deriving (Eq, Show, Ord, Generic)
 
+instance Functor (FgType tycon) where
+  fmap = bimap id
+
+instance Bifunctor FgType where
+  bimap f g = \case
+    FgType_TyConApp tycon tyList ->
+      FgType_TyConApp (f tycon) (map g tyList)
+
 instance Functor (BuiltinType tycon) where
   fmap = bimap id
 
 instance Bifunctor BuiltinType where
   bimap f g = \case
-    BuiltinType_Type tycon tyList ->
-      BuiltinType_Type (f tycon) $ fmap (bimap f g) tyList
+    BuiltinType_Type fgType ->
+      BuiltinType_Type (bimap f (bimap f g) fgType)
     BuiltinType_List bty ->
       BuiltinType_List $ bimap f g bty
     BuiltinType_Tuple boxity bty neBty ->
@@ -97,7 +104,7 @@ instance A.FromJSON Boxity where
 
 instance (A.ToJSON ty, A.ToJSON tycon) => A.ToJSON (BuiltinType tycon ty) where
   toJSON = \case
-    BuiltinType_Type tycon tyList -> A.object
+    BuiltinType_Type (FgType_TyConApp tycon tyList) -> A.object
       [("type", A.toJSON [("tycon" :: Compat.Aeson.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
     BuiltinType_List bty -> A.object
       [("list", A.toJSON bty)]
@@ -108,7 +115,7 @@ instance (A.ToJSON ty, A.ToJSON tycon) => A.ToJSON (BuiltinType tycon ty) where
 
 instance (A.FromJSON ty, A.FromJSON tycon) => A.FromJSON (BuiltinType tycon ty) where
   parseJSON = A.withObject "BuiltinType" $ \o -> do
-        parseKind o "type" (\o' -> BuiltinType_Type <$> o' A..: "tycon" <*> o' A..: "tycon_args")
+        parseKind o "type" (\o' -> BuiltinType_Type <$> (FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args"))
     <|> parseKind o "list" (pure . BuiltinType_List)
     <|> parseKind o "tuple" (tupleFromList Boxed)
     <|> parseKind o "tuple#" (tupleFromList Unboxed)
@@ -129,5 +136,6 @@ instance (A.FromJSON ty, A.FromJSON tycon) => A.FromJSON (BuiltinType tycon ty) 
           other ->
             fail $ "Tuple size must be >= 2 but size is: " <> show (length other)
 
+instance (NFData ty, NFData tycon) => NFData (FgType tycon ty)
 instance NFData Boxity
 instance (NFData ty, NFData tycon) => NFData (BuiltinType tycon ty)
