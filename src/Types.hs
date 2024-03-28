@@ -9,6 +9,8 @@
 module Types
 ( BuiltinType(..)
 , Boxity(..)
+, FgType(..)
+, FgTyCon(..)
 , isBoxed
 )
 where
@@ -24,9 +26,26 @@ import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
 import Data.Bifunctor (Bifunctor(..))
 
+-- | A fully qualified type constructor used by /Haskell Function Graph/.
+--
+--   Examples:
+--      @text-2.0.2:Data.Text.Internal.Text@,
+--      @base-4.18.0.0:GHC.Maybe.Maybe@,
+--      @base-4.18.0.0:Data.Either.Either@
+data FgTyCon text = FgTyCon
+  { fgTyConName :: text
+    -- ^ Name, e.g. the @Text@ in @text-2.0.2:Data.Text.Internal.Text@
+  , fgTyConModule :: text
+    -- ^ Module, e.g. the @Data.Text.Internal@ in @text-2.0.2:Data.Text.Internal.Text@
+  , fgTyConPackageName :: text
+    -- ^ Package name, e.g. the @text@ in @text-2.0.2:Data.Text.Internal.Text@
+  , fgTyConPackageVersion :: text
+    -- ^ Package version, e.g. the @2.0.2@ in @text-2.0.2:Data.Text.Internal.Text@
+  }
+
 -- | Types supported by /Haskell Function Graph/.
 --
---   Currently, only type constructors applications are supported,
+--   Currently only type constructors applications are supported,
 --   which does not include functions (the arrow type constructor).
 --
 --   More will be added later, probably.
@@ -38,10 +57,8 @@ data FgType tycon ty
       -- ^ A /type constructor/.
       -- Essentially the name of a type without any of its type variables filled in.
       -- E.g. 'Maybe', 'Either', 'IO', 'Map'.
-      -- Note that this is never the list nor tuple type constructor as they're
-      --  handled by 'BuiltinType_List' and 'BuiltinType_Tuple', respectively.
       [ty]
-      -- ^ Arguments to the type constructor.
+      -- ^ All arguments to the type constructor (fully saturated application).
       -- The empty list if the type constructor does not take any arguments
       --  (e.g. 'Int', 'Char', 'Text') and otherwise one type for all type variables
       --  of the type constructor (since we're only looking at the types of functions
@@ -49,6 +66,8 @@ data FgType tycon ty
     deriving (Eq, Show, Ord, Generic)
 
 -- | Either just a type, a list or a tuple
+--
+-- WIP: single "ty" type param and set to @FgType tycon (BuiltinType tycon ty)@?
 data BuiltinType tycon ty
   = BuiltinType_Type (FgType tycon (BuiltinType tycon ty))
   -- ^ A type that's neither a list nor a tuple

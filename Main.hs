@@ -42,7 +42,7 @@ import GHC.Core.Multiplicity (scaledThing)
 import qualified Control.Monad.Catch
 import qualified Control.Exception
 import GHC.Core.TyCo.Rep (Type(..))
-import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon)
+import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon, isTupleTyCon)
 import GHC.Builtin.Names (listTyConKey, getUnique)
 import qualified Data.Text as T
 import Data.Bifunctor (bimap)
@@ -263,27 +263,30 @@ noQualify =
 
 -- TODO:
 
-t = Tmp.boolTyCon
+ghcBuiltinTypeToFgTyCon
+  :: BuiltinType TyCon Type
+  -> BuiltinType (FgTyCon T.Text) (FgTyCon T.Text)
+ghcBuiltinTypeToFgTyCon = undefined
 
-toBuiltinType :: Type -> BuiltinType TyCon Type
-toBuiltinType !ty' = BuiltinType_Type Tmp.boolTyCon []
-
--- toBuiltinType' :: Type -> BuiltinType TyCon Type
--- toBuiltinType' !ty = case tcSplitTyConApp_maybe ty of
---   TyConApp tyCon (ty1:ty2:tyTail) -> -- tuple (of size >= 2)
---     let mBoxity -- 'Nothing' if it's not a tuple
---           | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
---           | isBoxedTupleTyCon tyCon = Just Types.Boxed
---           | otherwise = Nothing
---     in fromMaybe (BuiltinType_Type tycon tyList) $ do
---       boxity <- mBoxity
---       pure $ BuiltinType_Tuple
---         boxity
---         (toBuiltinType ty1)
---         (NE.map toBuiltinType $ ty2 NE.:| tyTail)
---   TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> -- list
---     BuiltinType_List (toBuiltinType ty1)
---   _ -> BuiltinType_Type tycon tyList -- neither a tuple nor list
+-- | Convert a 'TyConApp' 'Type' to a 'BuiltinType'
+toBuiltinType :: Type -> Maybe (BuiltinType TyCon Type)
+toBuiltinType !ty = case ty of
+  TyConApp tyCon (ty1:ty2:tyTail) | isTupleTyCon tyCon -> -- tuple (of size >= 2)
+    let boxity
+          | isUnboxedTupleTyCon tyCon = Types.Unboxed
+          | isBoxedTupleTyCon tyCon = Types.Boxed
+          | otherwise = error "toBuiltinType: 'isTupleTyCon' is True but neither 'isUnboxedTupleTyCon' nor 'isBoxedTupleTyCon' is"
+    in do
+      ty1' <- toBuiltinType ty1
+      tyTail' <- mapM toBuiltinType (ty2 NE.:| tyTail)
+      pure $ BuiltinType_Tuple boxity ty1' tyTail'
+  TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> do -- list
+    ty1' <- toBuiltinType ty1
+    pure $ BuiltinType_List ty1'
+  TyConApp tyCon tyList -> do -- neither a tuple nor list
+    tyList' <- mapM toBuiltinType tyList
+    pure $ BuiltinType_Type (FgType_TyConApp tyCon tyList')
+  _ -> Nothing
 
 traceType :: (Type -> Type) -> Type -> Type
 traceType ppr_ initTy =
