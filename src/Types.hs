@@ -24,17 +24,35 @@ import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
 import Data.Bifunctor (Bifunctor(..))
 
+type Test tycon ty
+  = BuiltinType tycon ty
+
+-- | Types supported by /Haskell Function Graph/.
+--
+--   Currently, only type constructors applications are supported,
+--   which does not include functions (the arrow type constructor).
+--
+--   More will be added later, probably.
+data FgType tycon ty
+  = FgType_TyConApp tycon ty
+
 -- | Either just a type, a list or a tuple
 data BuiltinType tycon ty
-  = BuiltinType_Type -- ^ A type consisting of (1) a type constructor, and (2) the types to which the constructor is applied.
+  = BuiltinType_Type
+    -- ^ A type consisting of (1) a type constructor,
+    -- and (2) the types to which the constructor is applied.
       tycon
       -- ^ A /type constructor/.
       -- Essentially the name of a type without any of its type variables filled in.
       -- E.g. 'Maybe', 'Either', 'IO', 'Map'.
-      -- Note that this is never the list nor tuple type constructor as they're handled by 'BuiltinType_List' and 'BuiltinType_Tuple', respectively.
+      -- Note that this is never the list nor tuple type constructor as they're
+      --  handled by 'BuiltinType_List' and 'BuiltinType_Tuple', respectively.
       [BuiltinType tycon ty]
       -- ^ Arguments to the type constructor.
-      -- The empty list if the type constructor does not take any arguments (e.g. 'Int', 'Char', 'Text') and otherwise one type for all type variables of the type constructor (since we're only looking at the types of functions exported from a module where a partially applied type constructor is invalid).
+      -- The empty list if the type constructor does not take any arguments
+      --  (e.g. 'Int', 'Char', 'Text') and otherwise one type for all type variables
+      --  of the type constructor (since we're only looking at the types of functions
+      --  exported from a module where a partially applied type constructor is invalid).
   | BuiltinType_List (BuiltinType tycon ty)
   -- ^ A list
   | BuiltinType_Tuple Boxity (BuiltinType tycon ty) (NE.NonEmpty (BuiltinType tycon ty))
