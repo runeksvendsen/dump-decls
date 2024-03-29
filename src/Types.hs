@@ -68,12 +68,12 @@ data FgType tycon ty
 -- | Either just a type, a list or a tuple
 --
 -- WIP: single "ty" type param and set to @FgType tycon (BuiltinType tycon ty)@?
-data BuiltinType tycon ty
-  = BuiltinType_Type (FgType tycon (BuiltinType tycon ty))
+data BuiltinType tycon
+  = BuiltinType_TyConApp tycon [BuiltinType tycon]
   -- ^ A type that's neither a list nor a tuple
-  | BuiltinType_List (BuiltinType tycon ty)
+  | BuiltinType_List (BuiltinType tycon)
   -- ^ A list
-  | BuiltinType_Tuple Boxity (BuiltinType tycon ty) (NE.NonEmpty (BuiltinType tycon ty))
+  | BuiltinType_Tuple Boxity (BuiltinType tycon) (NE.NonEmpty (BuiltinType tycon))
   -- ^ A tuple of size @1 + length nonEmptyList@
     deriving (Eq, Show, Ord, Generic)
 
@@ -90,8 +90,8 @@ instance Functor (BuiltinType tycon) where
 
 instance Bifunctor BuiltinType where
   bimap f g = \case
-    BuiltinType_Type fgType ->
-      BuiltinType_Type (bimap f (bimap f g) fgType)
+    BuiltinType_TyConApp fgType ->
+      BuiltinType_TyConApp (bimap f (bimap f g) fgType)
     BuiltinType_List bty ->
       BuiltinType_List $ bimap f g bty
     BuiltinType_Tuple boxity bty neBty ->
@@ -123,7 +123,7 @@ instance A.FromJSON Boxity where
 
 instance (A.ToJSON ty, A.ToJSON tycon) => A.ToJSON (BuiltinType tycon ty) where
   toJSON = \case
-    BuiltinType_Type (FgType_TyConApp tycon tyList) -> A.object
+    BuiltinType_TyConApp (FgType_TyConApp tycon tyList) -> A.object
       [("type", A.toJSON [("tycon" :: Compat.Aeson.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
     BuiltinType_List bty -> A.object
       [("list", A.toJSON bty)]
@@ -134,7 +134,7 @@ instance (A.ToJSON ty, A.ToJSON tycon) => A.ToJSON (BuiltinType tycon ty) where
 
 instance (A.FromJSON ty, A.FromJSON tycon) => A.FromJSON (BuiltinType tycon ty) where
   parseJSON = A.withObject "BuiltinType" $ \o -> do
-        parseKind o "type" (\o' -> BuiltinType_Type <$> (FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args"))
+        parseKind o "type" (\o' -> BuiltinType_TyConApp <$> (FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args"))
     <|> parseKind o "list" (pure . BuiltinType_List)
     <|> parseKind o "tuple" (tupleFromList Boxed)
     <|> parseKind o "tuple#" (tupleFromList Unboxed)

@@ -285,7 +285,7 @@ toBuiltinType !ty = case ty of
     pure $ BuiltinType_List ty1'
   TyConApp tyCon tyList -> do -- neither a tuple nor list
     tyList' <- mapM toBuiltinType tyList
-    pure $ BuiltinType_Type (FgType_TyConApp tyCon tyList')
+    pure $ BuiltinType_TyConApp (FgType_TyConApp tyCon tyList')
   _ -> Nothing
 
 traceType :: (Type -> Type) -> Type -> Type
