@@ -3,7 +3,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE StrictData #-}
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveFoldable #-}
 module Json
 ( FunctionType(..)
 , TypeInfo(..)
@@ -43,20 +43,15 @@ streamPrintJsonList jsonList =
 data FunctionType value = FunctionType
   { functionType_arg :: value
   , functionType_ret :: value
-  } deriving (Eq, Show, Ord, Functor, Generic)
+  } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
 instance A.ToJSON value => A.ToJSON (FunctionType value)
 instance A.FromJSON value => A.FromJSON (FunctionType value)
 instance NFData value => NFData (FunctionType value)
 
-instance Foldable FunctionType where
-  foldr f b ft =
-    foldr f b [functionType_arg ft, functionType_ret ft]
-
 instance Traversable FunctionType where
   traverse f ft =
-    (\case {[arg, ret] -> FunctionType arg ret; _ -> error "unpossible"})
-      <$> traverse f [functionType_arg ft, functionType_ret ft]
+    FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
 
 data TypeInfo tycon = TypeInfo
   { typeInfo_fullyQualified :: FunctionType (FgType tycon)
