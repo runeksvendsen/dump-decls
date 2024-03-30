@@ -45,7 +45,6 @@ import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon)
 import GHC.Builtin.Names (listTyConKey, getUnique)
 import qualified Data.Text as T
 import Data.Bifunctor (bimap)
-import Debug.Trace (trace)
 import GHC.Stack (HasCallStack)
 import Data.Functor.Identity (Identity(Identity))
 
@@ -150,7 +149,7 @@ reportModuleDecls pprFun unit_id modl_nm = do
 
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, Json.FunctionType (newTraceType (varName _id) $ scaledThing arg) (newTraceType (varName _id) res))
+            [ (varName _id, Json.FunctionType (scaledThing arg) res)
             | Just thing <- things
             , AnId _id <- [thing]
             , (arg, res) <- case splitFunTys $ varType _id of -- is it a function with exactly one argument?
@@ -162,21 +161,6 @@ reportModuleDecls pprFun unit_id modl_nm = do
                 _ -> True
             ]
     pure $ Map.fromList contents
-  where
-    newTraceType :: Name -> Type -> Type
-    newTraceType = traceP
-
-    traceP name ty = trace_ (ppr2 name ty) ty ty
-
-    ppr2 :: Name -> Type -> Type -> String
-    ppr2 name origTy subTy = ppr_ name ++ ",\"" ++ ppr_ subTy ++ "\",\"" ++ ppr_ origTy ++ "\""
-
-    ppr_ :: Outputable a => a -> String
-    ppr_ = T.unpack . fullyQualify'
-
-    fullyQualify', noQualify' :: Outputable a => a -> T.Text
-    fullyQualify' = pprFun . fullyQualify
-    noQualify' = pprFun . noQualify
 
 data DeclarationMap = DeclarationMap
   { declarationMap_package :: UnitId
@@ -204,9 +188,6 @@ declarationMapToJson pprFun dm =
     mapMapMaybe :: Ord k' => Map k a -> ((k, a) -> (k', Maybe a')) -> Map k' a'
     mapMapMaybe map' f = Map.fromList . map (fmap fromJust) . filter (isJust . snd) . map f . Map.toList $ map'
 
-    ppr_ :: Outputable a => a -> String
-    ppr_ = T.unpack . fullyQualify'
-
     funtionTypeToTypeInfo :: Json.FunctionType Type -> Maybe (Json.TypeInfo (FgTyCon T.Text))
     funtionTypeToTypeInfo funType = do
       funTyExpanded <- traverse (toBuiltinType . expandTypeSynonyms) funType
@@ -219,19 +200,6 @@ declarationMapToJson pprFun dm =
     fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . fullyQualify
     noQualify' = pprFun . noQualify
-
-
-trace_ ppr_ ty tyRet =
-  let
-      f ty' = case ty' of
-        TyConApp tyCon _tyList ->
-          ( "TMP_DEBUG Nothing " ++ if isTypeSynonymTyCon tyCon then "(synonym): " else ": " ++ typeConsActual (expandTypeSynonyms ty') ++ ", " ++ ppr_ ty') `trace` ty'
-        _ -> ty'
-
-      f' ty_ = case ty_ of
-        AppTy _ _ -> ( "TMP_DEBUG: " ++ ppr_ ty_) `trace` ty_
-        _ -> ty_
-  in f ty `seq` tyRet
 
 fullyQualify :: Outputable a => a -> SDoc
 fullyQualify =
@@ -306,34 +274,3 @@ toBuiltinType !ty = case ty of
       | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
       | isBoxedTupleTyCon tyCon = Just Types.Boxed
       | otherwise = Nothing
-
-traceType :: (Type -> Type) -> Type -> Type
-traceType ppr_ initTy =
-  let go !ty' = case ty' of
-        TyVarTy _var -> ty'
-        AppTy ty1 ty2 ->
-          -- let tyList = [ty1, ty2] in map ppr_ tyList `seq` map go tyList `seq` ty'
-          ppr_ ty1 `seq` ppr_ ty2 `seq` go ty1 `seq` go ty2 `seq` ty'
-        TyConApp _tyCon tyList ->
-          map ppr_ tyList `seq` map go tyList `seq` ty'
-        ForAllTy _forAllTyBinder ty ->
-          ppr_ ty `seq` go ty `seq` ty'
-        FunTy _af _mult ty1 ty2 ->
-          ppr_ ty1 `seq` ppr_ ty2 `seq` go ty1 `seq` go ty2 `seq` ty'
-        LitTy _tyLit -> ty'
-        CastTy ty _kindCoercion ->
-          ppr_ ty `seq` go ty `seq` ty'
-        CoercionTy _coercion  -> ty'
-  in ppr_ initTy `seq` go initTy
-
-typeConsActual :: Type -> String
-typeConsActual ty' =
-  case ty' of
-    TyVarTy _var -> "TyVarTy"
-    AppTy ty1 ty2 -> "AppTy"
-    TyConApp _tyCon tyList -> "TyConApp"
-    ForAllTy _forAllTyBinder ty -> "ForAllTy"
-    FunTy _af _mult ty1 ty2 -> "FunTy"
-    LitTy _tyLit -> "LitTy"
-    CastTy ty _kindCoercion -> "CastTy"
-    CoercionTy _coercion  -> "CoercionTy"
