@@ -15,3 +15,5 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - run: nix-build
+      - name: Test
+        run: nix-shell --run '$(nix-build)/bin/dump-decls $(ghc-pkg list --simple-output --names-only)'
