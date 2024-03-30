@@ -10,9 +10,9 @@ where
 
 import Types
 import qualified Json
-import GHC
+import GHC hiding (moduleName)
 import qualified GHC.Paths
-import GHC.Core.Type (splitFunTys, expandTypeSynonyms, tcSplitTyConApp_maybe)
+import GHC.Core.Type (splitFunTys, expandTypeSynonyms)
 import GHC.Driver.Ppr (showSDocForUser)
 import GHC.Unit.State (lookupUnitId, lookupPackageName)
 import GHC.Unit.Info (UnitInfo, unitExposedModules, unitId, PackageName(..))
@@ -27,7 +27,6 @@ import GHC.Types.Var (varName, varType)
 import Data.Function (on)
 import Data.List (sortBy)
 import System.Environment (getArgs)
-import Prelude hiding ((<>))
 import Control.Monad (forM)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -36,18 +35,19 @@ import qualified System.Exit as Exit
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import GHC.IO.Unsafe (unsafeInterleaveIO)
 import qualified System.IO as IO
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromJust, isJust)
 import qualified Control.Exception as Ex
 import GHC.Core.Multiplicity (scaledThing)
 import qualified Control.Monad.Catch
 import qualified Control.Exception
 import GHC.Core.TyCo.Rep (Type(..))
-import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon, isTupleTyCon)
+import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon)
 import GHC.Builtin.Names (listTyConKey, getUnique)
 import qualified Data.Text as T
 import Data.Bifunctor (bimap)
 import Debug.Trace (trace)
-import qualified GHC.Builtin.Types as Tmp
+import GHC.Stack (HasCallStack)
+import Data.Functor.Identity (Identity(Identity))
 
 main :: IO ()
 main = do
@@ -178,7 +178,6 @@ reportModuleDecls pprFun unit_id modl_nm = do
     fullyQualify' = pprFun . fullyQualify
     noQualify' = pprFun . noQualify
 
-
 data DeclarationMap = DeclarationMap
   { declarationMap_package :: UnitId
   , declarationMap_moduleDeclarations :: Map ModuleName (Map Name (Json.FunctionType Type))
@@ -195,26 +194,27 @@ declarationMapToJson pprFun dm =
     , Json.declarationMapJson_moduleDeclarations = Json.ModuleDeclarations $
         mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
           ( fullyQualify' modName
-          , mapMap nameMap $ bimap noQualify' funtionTypeToTypeInfo
+          , mapMapMaybe nameMap $ bimap noQualify' funtionTypeToTypeInfo
           )
     }
   where
     mapMap :: Ord k' => Map k a -> ((k, a) -> (k', a')) -> Map k' a'
     mapMap map' f = Map.fromList . map f . Map.toList $ map'
 
+    mapMapMaybe :: Ord k' => Map k a -> ((k, a) -> (k', Maybe a')) -> Map k' a'
+    mapMapMaybe map' f = Map.fromList . map (fmap fromJust) . filter (isJust . snd) . map f . Map.toList $ map'
 
     ppr_ :: Outputable a => a -> String
     ppr_ = T.unpack . fullyQualify'
 
-    funtionTypeToTypeInfo :: Json.FunctionType Type -> Json.TypeInfo T.Text T.Text
-    funtionTypeToTypeInfo funType = Json.TypeInfo
-      { Json.typeInfo_fullyQualified =
-          bimap fullyQualify' fullyQualify' . toBuiltinType . expandTypeSynonyms <$> funType -- trace_ ppr_ (Json.functionType_ret funType) . trace_ ppr_ (Json.functionType_arg funType) <$> funType
-      , Json.typeInfo_unqualified =
-          bimap noQualify' noQualify' . toBuiltinType . expandTypeSynonyms <$> funType
-      , Json.typeInfo_tmpUnexpanded =
-          bimap fullyQualify' fullyQualify' . toBuiltinType <$> funType
-      }
+    funtionTypeToTypeInfo :: Json.FunctionType Type -> Maybe (Json.TypeInfo (FgTyCon T.Text))
+    funtionTypeToTypeInfo funType = do
+      funTyExpanded <- traverse (toBuiltinType . expandTypeSynonyms) funType
+      funTy <- traverse toBuiltinType funType
+      pure $ tyConToFgTyCon pprFun <$> Json.TypeInfo
+        { Json.typeInfo_fullyQualified = funTyExpanded
+        , Json.typeInfo_tmpUnexpanded = funTy
+        }
 
     fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . fullyQualify
@@ -258,35 +258,54 @@ noQualify =
         , queryPromotionTick = const True
         }
 
+tyConToFgTyCon
+  :: HasCallStack
+  => (SDoc -> T.Text)
+  -> TyCon
+  -> FgTyCon T.Text
+tyConToFgTyCon pprFun =
+  either (error . ("tyConToFgTyCon: BUG: " <>)) id . parseFQN . fullyQualify'
+  where
+    fullyQualify' = pprFun . fullyQualify
 
+    -- Example str: "base-4.18.0.0:Data.Either.Either"
+    parseFQN :: T.Text -> Either String (FgTyCon T.Text)
+    parseFQN str = do
+      (packageAndVersion, fqn) <- case T.splitOn ":" str of
+        [packageAndVersion, fqn] -> pure (packageAndVersion, fqn)
+        _ -> Left $ "missing colon in " <> show (T.unpack str)
+      (packageName, packageVersion) <- case T.spanEndM (pure . (== '-')) packageAndVersion of
+        Identity (p, v) | not (T.null p) && not (T.null p) -> pure (p, v)
+        _ -> Left $ "invalid package identifier in " <> show (T.unpack str)
+      (moduleName, name) <- case T.spanEndM (pure . (== '.')) fqn of
+        Identity (p, v) | not (T.null p) && not (T.null p) -> pure (p, v)
+        _ -> Left $ "invalid fully qualified identifier in " <> show (T.unpack str)
+      pure $ FgTyCon
+        { fgTyConName = name
+        , fgTyConModule = moduleName
+        , fgTyConPackageName = packageName
+        , fgTyConPackageVersion = packageVersion
+        }
 
-
--- TODO:
-
-ghcBuiltinTypeToFgTyCon
-  :: BuiltinType TyCon Type
-  -> BuiltinType (FgTyCon T.Text) (FgTyCon T.Text)
-ghcBuiltinTypeToFgTyCon = undefined
-
--- | Convert a 'TyConApp' 'Type' to a 'BuiltinType'
-toBuiltinType :: Type -> Maybe (BuiltinType TyCon Type)
+-- | Convert a 'TyConApp' 'Type' to a 'FgType'
+toBuiltinType :: Type -> Maybe (FgType TyCon)
 toBuiltinType !ty = case ty of
-  TyConApp tyCon (ty1:ty2:tyTail) | isTupleTyCon tyCon -> -- tuple (of size >= 2)
-    let boxity
-          | isUnboxedTupleTyCon tyCon = Types.Unboxed
-          | isBoxedTupleTyCon tyCon = Types.Boxed
-          | otherwise = error "toBuiltinType: 'isTupleTyCon' is True but neither 'isUnboxedTupleTyCon' nor 'isBoxedTupleTyCon' is"
-    in do
+  TyConApp tyCon (ty1:ty2:tyTail) | Just boxity <- tupleBoxity tyCon -> do -- tuple (of size >= 2)
       ty1' <- toBuiltinType ty1
       tyTail' <- mapM toBuiltinType (ty2 NE.:| tyTail)
       pure $ BuiltinType_Tuple boxity ty1' tyTail'
   TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> do -- list
     ty1' <- toBuiltinType ty1
     pure $ BuiltinType_List ty1'
-  TyConApp tyCon tyList -> do -- neither a tuple nor list
+  TyConApp tyCon tyList -> do -- neither a tuple nor a list
     tyList' <- mapM toBuiltinType tyList
-    pure $ BuiltinType_TyConApp (FgType_TyConApp tyCon tyList')
+    pure $ BuiltinType_TyConApp tyCon tyList'
   _ -> Nothing
+  where
+    tupleBoxity tyCon
+      | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
+      | isBoxedTupleTyCon tyCon = Just Types.Boxed
+      | otherwise = Nothing
 
 traceType :: (Type -> Type) -> Type -> Type
 traceType ppr_ initTy =
