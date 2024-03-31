@@ -22,7 +22,7 @@ import GHC.Data.FastString (fsLit)
 import GHC.Driver.Env (hsc_units)
 import GHC.Utils.Outputable hiding (sep, (<>))
 import GHC.Types.TyThing (tyThingParent_maybe)
-import GHC.Types.Name (nameOccName)
+import GHC.Types.Name (nameOccName, getSrcLoc)
 import GHC.Types.Name.Occurrence (OccName)
 import GHC.Types.Var (varName, varType)
 import Data.Function (on)
@@ -218,10 +218,11 @@ declarationMapToJson pprFun dm =
         fullyQualify' = pprFun . fullyQualify
 
         bugMsg e = T.unpack $ T.unwords
-          [ "tyConToFgTyCon: failed to parse", T.pack e <> "."
+          [ "tyConToFgTyCon: parsing failed.", T.pack e <> "."
           , "Package:", pprFun (ppr package) <> "."
           , "Module:", pprFun (ppr modName) <> "."
           , "Unique:" , pprFun (ppr $ getUnique tyCon) <> "."
+          , "SrcLoc:", pprFun (ppr $ getSrcLoc tyCon) <> "."
           ]
 
 fullyQualify :: Outputable a => a -> SDoc
