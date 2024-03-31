@@ -179,7 +179,8 @@ declarationMapToJson pprFun dm =
     , Json.declarationMapJson_moduleDeclarations = Json.ModuleDeclarations $
         mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
           ( fullyQualify' modName
-          , mapMapMaybe nameMap $ bimap noQualify' (funtionTypeToTypeInfo modName)
+          , mapMapMaybe nameMap $ \(name, functionType) ->
+              (noQualify' name, funtionTypeToTypeInfo (modName, name) functionType)
           )
     }
   where
@@ -192,13 +193,13 @@ declarationMapToJson pprFun dm =
     mapMapMaybe map' f = Map.fromList . map (fmap fromJust) . filter (isJust . snd) . map f . Map.toList $ map'
 
     funtionTypeToTypeInfo
-      :: ModuleName -- for debugging purposes
+      :: (ModuleName, Name) -- for debugging purposes
       -> Json.FunctionType Type
       -> Maybe (Json.TypeInfo (FgTyCon T.Text))
-    funtionTypeToTypeInfo modName funType = do
+    funtionTypeToTypeInfo dbg funType = do
       funTyExpanded <- traverse (toBuiltinType . expandTypeSynonyms) funType
       funTy <- traverse toBuiltinType funType
-      pure $ tyConToFgTyCon modName <$> Json.TypeInfo
+      pure $ tyConToFgTyCon dbg <$> Json.TypeInfo
         { Json.typeInfo_fullyQualified = funTyExpanded
         , Json.typeInfo_tmpUnexpanded = funTy
         }
@@ -209,16 +210,17 @@ declarationMapToJson pprFun dm =
 
     tyConToFgTyCon
       :: HasCallStack
-      => ModuleName -- for debugging purposes
+      => (ModuleName, Name) -- for debugging purposes
       -> TyCon
       -> FgTyCon T.Text
-    tyConToFgTyCon modName tyCon =
+    tyConToFgTyCon (modName, functionName) tyCon =
       either (error . bugMsg) id . parsePprTyCon . fullyQualify' $ tyCon
       where
         fullyQualify' = pprFun . fullyQualify
 
         bugMsg e = T.unpack $ T.unwords
           [ "tyConToFgTyCon: parsing failed.", T.pack e <> "."
+          , "Function:", pprFun (ppr functionName) <> "."
           , "Package:", pprFun (ppr package) <> "."
           , "Module:", pprFun (ppr modName) <> "."
           , "Unique:" , pprFun (ppr $ getUnique tyCon) <> "."
