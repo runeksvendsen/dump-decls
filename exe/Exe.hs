@@ -206,10 +206,15 @@ declarationMapToJson pprFun dm =
       :: HasCallStack
       => TyCon
       -> FgTyCon T.Text
-    tyConToFgTyCon =
-      either (error . ("tyConToFgTyCon: BUG: " <>)) id . parsePprTyCon . fullyQualify'
+    tyConToFgTyCon tyCon =
+      either (error . bugMsg) id . parsePprTyCon . fullyQualify' $ tyCon
       where
         fullyQualify' = pprFun . fullyQualify
+
+        bugMsg e = T.unpack $ T.unwords
+          [ "tyConToFgTyCon: BUG:", T.pack e <> "."
+          , "Unique:" , pprFun (ppr $ getUnique tyCon)
+          ]
 
 fullyQualify :: Outputable a => a -> SDoc
 fullyQualify =
