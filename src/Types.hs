@@ -5,6 +5,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use camelCase" #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- |
 -- TODO: Test 'Data.Aeson.encode
 module Types
@@ -52,8 +53,10 @@ instance (NFData a) => NFData (FgTyCon a)
 --   which does not include functions (the arrow type constructor).
 --
 --   More will be added later, probably.
+--
+--   Type constructors that have special syntax are handled separately: lists, tuples, unit.
 data FgType tycon
-  = BuiltinType_TyConApp
+  = FgType_TyConApp
     -- ^ A type consisting of (1) a type constructor,
     -- and (2) the types to which the constructor is applied.
       tycon
@@ -67,20 +70,24 @@ data FgType tycon
       --  of the type constructor (since we're only looking at the types of functions
       --  exported from a module where a partially applied type constructor is invalid).
   -- ^ A type that's neither a list nor a tuple
-  | BuiltinType_List (FgType tycon)
+  | FgType_List (FgType tycon)
   -- ^ A list
-  | BuiltinType_Tuple Boxity (FgType tycon) (NE.NonEmpty (FgType tycon))
+  | FgType_Tuple Boxity (FgType tycon) (NE.NonEmpty (FgType tycon))
   -- ^ A tuple of size @1 + length nonEmptyList@
+  | FgType_Unit
+  -- ^ Unit ('()')
     deriving (Eq, Show, Ord, Generic)
 
 instance Functor FgType where
   fmap f = \case
-    BuiltinType_TyConApp tycon tyList ->
-      BuiltinType_TyConApp (f tycon) (map (fmap f) tyList)
-    BuiltinType_List bty ->
-      BuiltinType_List $ fmap f bty
-    BuiltinType_Tuple boxity bty neBty ->
-      BuiltinType_Tuple boxity (fmap f bty) (NE.map (fmap f) neBty)
+    FgType_TyConApp tycon tyList ->
+      FgType_TyConApp (f tycon) (map (fmap f) tyList)
+    FgType_List bty ->
+      FgType_List $ fmap f bty
+    FgType_Tuple boxity bty neBty ->
+      FgType_Tuple boxity (fmap f bty) (NE.map (fmap f) neBty)
+    FgType_Unit ->
+      FgType_Unit
 
 data Boxity
   = Boxed
@@ -108,21 +115,23 @@ instance A.FromJSON Boxity where
 
 instance (A.ToJSON tycon) => A.ToJSON (FgType tycon) where
   toJSON = \case
-    BuiltinType_TyConApp tycon tyList -> A.object
+    FgType_TyConApp tycon tyList -> A.object
       [("type", A.toJSON [("tycon" :: Compat.Aeson.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
-    BuiltinType_List bty -> A.object
+    FgType_List bty -> A.object
       [("list", A.toJSON bty)]
-    BuiltinType_Tuple boxity bty neBty ->
+    FgType_Tuple boxity bty neBty ->
       let key = case boxity of {Unboxed -> "tuple#"; Boxed -> "tuple"}
       in A.object
         [(key, A.toJSON $ bty : NE.toList neBty)]
+    FgType_Unit -> A.object [("unit", A.toJSON ())]
 
 instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
   parseJSON = A.withObject "FgType" $ \o -> do
-        parseKind o "type" (\o' ->  BuiltinType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args")
-    <|> parseKind o "list" (pure . BuiltinType_List)
+        parseKind o "type" (\o' ->  FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args")
+    <|> parseKind o "list" (pure . FgType_List)
     <|> parseKind o "tuple" (tupleFromList Boxed)
     <|> parseKind o "tuple#" (tupleFromList Unboxed)
+    <|> parseKind o "unit" (\(_ :: ()) -> pure FgType_Unit)
       where
         -- apply function to value if (key,value) exists in the object
         parseKind
@@ -136,7 +145,7 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
 
         tupleFromList boxity = \case
           ty1:ty2:tyTail ->
-            pure $ BuiltinType_Tuple boxity ty1 (ty2 NE.:| tyTail)
+            pure $ FgType_Tuple boxity ty1 (ty2 NE.:| tyTail)
           other ->
             fail $ "Tuple size must be >= 2 but size is: " <> show (length other)
 

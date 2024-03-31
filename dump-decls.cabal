@@ -20,8 +20,32 @@ library
     default-language: Haskell2010
     ghc-options:      -Wall
 
+library dump-decls-exe
+    exposed-modules: Exe
+    hs-source-dirs: exe
+    build-depends:    base, dump-decls, ghc, containers, text, bytestring, exceptions, ghc-paths
+
 executable dump-decls
     main-is:          Main.hs
-    build-depends:    base, dump-decls, ghc, containers, text, bytestring, exceptions, ghc-paths
+    build-depends:    base, dump-decls-exe
     default-language: Haskell2010
     ghc-options:      -Wall
+
+test-suite test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs:
+      test
+  ghc-options: -Wall
+  build-depends:
+      base
+    , dump-decls
+    , dump-decls-exe
+    , process
+    , silently
+    , text
+    , aeson
+    , bytestring
+    , hspec-expectations-pretty-diff
+    , hspec
+  default-language: Haskell2010

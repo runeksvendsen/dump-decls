@@ -4,10 +4,11 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE TupleSections #-}
 module Json
 ( FunctionType(..)
 , TypeInfo(..)
-, ModuleDeclarations(..), fmapModuleDeclarations
+, ModuleDeclarations(..), fmapModuleDeclarations, explodeModuleDeclarations
 , DeclarationMapJson(..), fmapDeclarationMapJson
   -- * Util
 , streamPrintJsonList
@@ -75,10 +76,19 @@ fmapModuleDeclarations
 fmapModuleDeclarations f (ModuleDeclarations map') = ModuleDeclarations $
   Map.mapKeys f (fmap (Map.mapKeys f . fmap (fmap (fmap f))) map')
 
+explodeModuleDeclarations
+  :: ModuleDeclarations value
+  -> [(value, (value, TypeInfo (FgTyCon value)))]
+explodeModuleDeclarations =
+  concatMap (\(value, lst) -> map (value,) lst)
+    . Map.toList
+    . fmap Map.toList
+    . moduleDeclarations_map
+
 data DeclarationMapJson value = DeclarationMapJson
   { declarationMapJson_package :: value
   , declarationMapJson_moduleDeclarations :: ModuleDeclarations value
-  } deriving (Generic, Show)
+  } deriving (Eq, Generic, Show)
 
 instance NFData a => NFData (DeclarationMapJson a)
 
