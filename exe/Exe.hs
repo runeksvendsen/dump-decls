@@ -175,25 +175,30 @@ declarationMapToJson
   -> Json.DeclarationMapJson T.Text
 declarationMapToJson pprFun dm =
   Json.DeclarationMapJson
-    { Json.declarationMapJson_package = fullyQualify' $ declarationMap_package dm
+    { Json.declarationMapJson_package = fullyQualify' package
     , Json.declarationMapJson_moduleDeclarations = Json.ModuleDeclarations $
         mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
           ( fullyQualify' modName
-          , mapMapMaybe nameMap $ bimap noQualify' funtionTypeToTypeInfo
+          , mapMapMaybe nameMap $ bimap noQualify' (funtionTypeToTypeInfo modName)
           )
     }
   where
+    package = declarationMap_package dm
+
     mapMap :: Ord k' => Map k a -> ((k, a) -> (k', a')) -> Map k' a'
     mapMap map' f = Map.fromList . map f . Map.toList $ map'
 
     mapMapMaybe :: Ord k' => Map k a -> ((k, a) -> (k', Maybe a')) -> Map k' a'
     mapMapMaybe map' f = Map.fromList . map (fmap fromJust) . filter (isJust . snd) . map f . Map.toList $ map'
 
-    funtionTypeToTypeInfo :: Json.FunctionType Type -> Maybe (Json.TypeInfo (FgTyCon T.Text))
-    funtionTypeToTypeInfo funType = do
+    funtionTypeToTypeInfo
+      :: ModuleName -- for debugging purposes
+      -> Json.FunctionType Type
+      -> Maybe (Json.TypeInfo (FgTyCon T.Text))
+    funtionTypeToTypeInfo modName funType = do
       funTyExpanded <- traverse (toBuiltinType . expandTypeSynonyms) funType
       funTy <- traverse toBuiltinType funType
-      pure $ tyConToFgTyCon <$> Json.TypeInfo
+      pure $ tyConToFgTyCon modName <$> Json.TypeInfo
         { Json.typeInfo_fullyQualified = funTyExpanded
         , Json.typeInfo_tmpUnexpanded = funTy
         }
@@ -204,16 +209,19 @@ declarationMapToJson pprFun dm =
 
     tyConToFgTyCon
       :: HasCallStack
-      => TyCon
+      => ModuleName -- for debugging purposes
+      -> TyCon
       -> FgTyCon T.Text
-    tyConToFgTyCon tyCon =
+    tyConToFgTyCon modName tyCon =
       either (error . bugMsg) id . parsePprTyCon . fullyQualify' $ tyCon
       where
         fullyQualify' = pprFun . fullyQualify
 
         bugMsg e = T.unpack $ T.unwords
-          [ "tyConToFgTyCon: BUG:", T.pack e <> "."
-          , "Unique:" , pprFun (ppr $ getUnique tyCon)
+          [ "tyConToFgTyCon: failed to parse", T.pack e <> "."
+          , "Package:", pprFun (ppr package) <> "."
+          , "Module:", pprFun (ppr modName) <> "."
+          , "Unique:" , pprFun (ppr $ getUnique tyCon) <> "."
           ]
 
 fullyQualify :: Outputable a => a -> SDoc
