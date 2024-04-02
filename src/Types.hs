@@ -5,13 +5,14 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use camelCase" #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- |
 -- TODO: Test 'Data.Aeson.encode
 module Types
 ( FgType(..)
 , Boxity(..)
-, FgTyCon(..)
+, FgTyCon(..), TyConParseError(..)
 , isBoxed
 )
 where
@@ -41,11 +42,20 @@ data FgTyCon text = FgTyCon
     -- ^ Package name, e.g. the @text@ in @text-2.0.2:Data.Text.Internal.Text@
   , fgTyConPackageVersion :: text
     -- ^ Package version, e.g. the @2.0.2@ in @text-2.0.2:Data.Text.Internal.Text@
-  } deriving (Eq, Show, Ord, Generic, Functor) -- A.ToJSON, A.FromJSON, NFData)
+  } deriving (Eq, Show, Ord, Generic, Functor)
 
 instance (A.ToJSON a) => A.ToJSON (FgTyCon a)
 instance (A.FromJSON a) => A.FromJSON (FgTyCon a)
 instance (NFData a) => NFData (FgTyCon a)
+
+-- | An error converting a GHC TyCon into an 'FgTyCon'
+data TyConParseError = TyConParseError { unTyConParseError:: String } -- TODO: not just a String
+  deriving (Eq, Show, Ord, Generic)
+
+instance A.ToJSON TyConParseError
+instance A.FromJSON TyConParseError
+instance NFData TyConParseError
+
 
 -- | Types supported by /Haskell Function Graph/.
 --
@@ -76,7 +86,7 @@ data FgType tycon
   -- ^ A tuple of size @1 + length nonEmptyList@
   | FgType_Unit
   -- ^ Unit ('()')
-    deriving (Eq, Show, Ord, Generic)
+    deriving (Eq, Show, Ord, Foldable, Generic)
 
 instance Functor FgType where
   fmap f = \case
