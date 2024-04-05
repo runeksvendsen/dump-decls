@@ -30,7 +30,6 @@ import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
 import qualified Codec.Binary.UTF8.String as UTF8
 import qualified Data.ByteString.Lazy as BSL
-import Data.Functor.Identity (Identity(Identity))
 
 -- | A fully qualified type constructor used by /Haskell Function Graph/.
 --
@@ -254,8 +253,8 @@ splitByEndNonEmpty
   -> T.Text -- String to split
   -> Either String (T.Text, T.Text)
 splitByEndNonEmpty err char str' =
-  case T.spanEndM (pure . (/= char)) str' of
-    Identity (a', b)
+  case Compat.Aeson.spanEnd (/= char) str' of
+    (a', b)
       | Just (a, _) <- T.unsnoc a' -- remove trailing "char"
       , not (T.null b) && not (T.null a) ->
         pure (a, b)
