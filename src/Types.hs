@@ -9,10 +9,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 -- |
 -- TODO: Test 'Data.Aeson.encode
+-- TODO: Merge "Types" and "JSON"?
 module Types
 ( FgType(..)
 , Boxity(..)
 , FgTyCon(..), parsePprTyCon, TyConParseError(..)
+, FgPackage(..), parsePackageWithVersion
 , isBoxed
 )
 where
@@ -41,15 +43,25 @@ data FgTyCon text = FgTyCon
     -- ^ Name, e.g. the @Text@ in @text-2.0.2:Data.Text.Internal.Text@
   , fgTyConModule :: text
     -- ^ Module, e.g. the @Data.Text.Internal@ in @text-2.0.2:Data.Text.Internal.Text@
-  , fgTyConPackageName :: text
-    -- ^ Package name, e.g. the @text@ in @text-2.0.2:Data.Text.Internal.Text@
-  , fgTyConPackageVersion :: text
-    -- ^ Package version, e.g. the @2.0.2@ in @text-2.0.2:Data.Text.Internal.Text@
+  , fgTyConPackage :: FgPackage text
+    -- ^ Package
   } deriving (Eq, Show, Ord, Generic, Functor)
 
 instance (A.ToJSON a) => A.ToJSON (FgTyCon a)
 instance (A.FromJSON a) => A.FromJSON (FgTyCon a)
 instance (NFData a) => NFData (FgTyCon a)
+
+-- | A package used by /Haskell Function Graph/.
+data FgPackage text = FgPackage
+  { fgPackageName :: text
+    -- ^ Package name, e.g. @text@
+  , fgPackageVersion :: text
+    -- ^ Package version, e.g. @2.0.2@
+  } deriving (Eq, Show, Ord, Generic, Functor)
+
+instance (A.ToJSON a) => A.ToJSON (FgPackage a)
+instance (A.FromJSON a) => A.FromJSON (FgPackage a)
+instance (NFData a) => NFData (FgPackage a)
 
 -- | An error converting a GHC TyCon into an 'FgTyCon'
 data TyConParseError = TyConParseError { unTyConParseError:: String } -- TODO: not just a String
@@ -58,7 +70,6 @@ data TyConParseError = TyConParseError { unTyConParseError:: String } -- TODO: n
 instance A.ToJSON TyConParseError
 instance A.FromJSON TyConParseError
 instance NFData TyConParseError
-
 
 -- | Types supported by /Haskell Function Graph/.
 --
@@ -192,6 +203,14 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
 instance NFData Boxity
 instance (NFData tycon) => NFData (FgType tycon)
 
+parsePackageWithVersion
+  :: T.Text
+  -> Either String (FgPackage T.Text)
+parsePackageWithVersion packageAndVersion = do
+  (packageName, packageVersion) <-
+    splitByEndNonEmpty "invalid package identifier" '-' packageAndVersion
+  pure $ FgPackage packageName packageVersion
+
 -- | Parse a 'FgTyCon' from a GHC @TyCon@ pretty-printed in fully-qualified form
 --  (e.g. "base-4.18.0.0:Data.Either.Either").
 --
@@ -214,22 +233,30 @@ parsePprTyCon str = do
   (packageAndVersion, fqn) <- case T.splitOn ":" str of
     [packageAndVersion, fqn] -> pure (packageAndVersion, fqn)
     _ -> Left $ "missing colon in " <> show (T.unpack str)
-  (packageName, packageVersion) <-
-    splitByNonEmpty "invalid package identifier" '-' packageAndVersion
+  package <- parsePackageWithVersion packageAndVersion
   (moduleName, name) <-
-    splitByNonEmpty "invalid fully qualified identifier" '.' fqn
+    splitByEndNonEmpty "invalid fully qualified identifier" '.' fqn
   pure $ FgTyCon
     { fgTyConName = name
     , fgTyConModule = moduleName
-    , fgTyConPackageName = packageName
-    , fgTyConPackageVersion = packageVersion
+    , fgTyConPackage = package
     }
-  where
-    -- split by "char" and return pair of non-empty text strings
-    splitByNonEmpty err char str' =
-      case T.spanEndM (pure . (/= char)) str' of
-        Identity (a', b)
-          | Just (a, _) <- T.unsnoc a' -- remove trailing "char"
-          , not (T.null b) && not (T.null a) ->
-            pure (a, b)
-        _ -> Left $ err <> " in " <> show (T.unpack str')
+
+-- | Split string by last occurence of character.
+--   Return pair of non-empty text strings before and after character (neither string includes the character).
+--
+-- Example:
+-- >>> splitByEndNonEmpty "oops" '.' "Data.ByteString.Lazy.Internal.ByteString"
+-- Right ("Data.ByteString.Lazy.Internal","ByteString")
+splitByEndNonEmpty
+  :: String -- Error prefix
+  -> Char -- Split by this character
+  -> T.Text -- String to split
+  -> Either String (T.Text, T.Text)
+splitByEndNonEmpty err char str' =
+  case T.spanEndM (pure . (/= char)) str' of
+    Identity (a', b)
+      | Just (a, _) <- T.unsnoc a' -- remove trailing "char"
+      , not (T.null b) && not (T.null a) ->
+        pure (a, b)
+    _ -> Left $ err <> " in " <> show (T.unpack str')

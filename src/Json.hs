@@ -25,7 +25,7 @@ import qualified Data.Aeson as A
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Map as Map
-import Types (FgType, FgTyCon, TyConParseError)
+import Types (FgType, FgTyCon, TyConParseError, FgPackage)
 
 streamPrintJsonList
   :: A.ToJSON a
@@ -99,7 +99,7 @@ explodeModuleDeclarations =
     . moduleDeclarations_map
 
 data DeclarationMapJson value = DeclarationMapJson
-  { declarationMapJson_package :: value
+  { declarationMapJson_package :: FgPackage value
   , declarationMapJson_moduleDeclarations :: ModuleDeclarations value
   } deriving (Eq, Generic, Show)
 
@@ -112,7 +112,7 @@ fmapDeclarationMapJson
   -> DeclarationMapJson b
 fmapDeclarationMapJson f dmj =
   DeclarationMapJson
-    { declarationMapJson_package = f $ declarationMapJson_package dmj
+    { declarationMapJson_package = f <$> declarationMapJson_package dmj
     , declarationMapJson_moduleDeclarations = fmapModuleDeclarations f $ declarationMapJson_moduleDeclarations dmj
 
     }

@@ -66,7 +66,7 @@ main = do
       forM_ pkgErrs $ \(defnName, err) ->
         logError $ ("WARNING: " <>) $ unwords
           [ "Parse failure for package"
-          , T.unpack $ Json.declarationMapJson_package declarationMapJson <> "."
+          , T.unpack $ "'" <> fgPackageName (Json.declarationMapJson_package declarationMapJson) <> "'."
           , "Definition:", T.unpack $ modName <> "." <> defnName <> ":"
           , unTyConParseError err
           ]
@@ -193,8 +193,10 @@ declarationMapToJson pprFun dm =
           (noQualify' name, funtionTypeToTypeInfo (modName, name) functionType)
       )
 
+    fgPackage = either (error . ("BUG: declarationMapToJson: " <>)) id (parsePackageWithVersion $ fullyQualify' package)
+
   in Json.DeclarationMapJson
-    { Json.declarationMapJson_package = fullyQualify' package
+    { Json.declarationMapJson_package = fgPackage
     , Json.declarationMapJson_moduleDeclarations =
         Json.ModuleDeclarations
           (nonEmptyMapMap $ mapEitherRight <$> eitherMap)
@@ -245,7 +247,7 @@ declarationMapToJson pprFun dm =
         fullyQualify' = pprFun . fullyQualify
 
         bugMsg e = T.unpack $ T.unwords
-          [ "tyConToFgTyCon: parsing failed.", T.pack e <> "."
+          [ T.pack e <> "."
           , "Function:", pprFun (ppr functionName) <> "."
           , "Package:", pprFun (ppr package) <> "."
           , "Module:", pprFun (ppr modName) <> "."

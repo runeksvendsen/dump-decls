@@ -37,7 +37,7 @@ spec declarationMapJson =
 -- | System.IO.putStrLn :: String -> IO ()
 specPutStrLn :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
 specPutStrLn =
-    mkSpec "base-4.18.0.0" "System.IO" "putStrLn" tiPutStrLn
+    mkSpec "base" "System.IO" "putStrLn" tiPutStrLn
   where
     tyConIO = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
     tyConString = parsePprTyCon "base-4.18.0.0:GHC.Base.String"
@@ -58,7 +58,7 @@ specPutStrLn =
 -- | Data.Text.unsnoc :: Text -> Maybe (Text, Char)
 specUnsnoc :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
 specUnsnoc =
-    mkSpec "text-2.0.2" "Data.Text" "unsnoc" tiUnsnoc
+    mkSpec "text" "Data.Text" "unsnoc" tiUnsnoc
   where
     tyConText = parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
     fgTypeText = Types.FgType_TyConApp tyConText []
@@ -87,7 +87,7 @@ mkSpec
   -> Test.Hspec.Spec
 mkSpec pkgName modName defnName expected declarationMapJson =
   Test.Hspec.it (T.unpack $ modName <> "." <> defnName) $ do
-    let mBaseDeclarationMapJson = lookupOn ((== pkgName) . Json.declarationMapJson_package) declarationMapJson
+    let mBaseDeclarationMapJson = lookupOn ((== pkgName) . Types.fgPackageName . Json.declarationMapJson_package) declarationMapJson
         baseDeclarationMapJson = fromJust mBaseDeclarationMapJson
     mBaseDeclarationMapJson `shouldNotBe` Nothing
     let modDecls = Json.declarationMapJson_moduleDeclarations baseDeclarationMapJson
