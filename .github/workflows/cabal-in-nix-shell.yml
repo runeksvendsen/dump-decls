@@ -54,3 +54,6 @@ jobs:
 
       - name: Test run of 'dump-decls' executable
         run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)'
+
+      - name: Run test suite
+        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE test'
