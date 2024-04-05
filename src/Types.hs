@@ -26,6 +26,8 @@ import Control.Applicative (empty, (<|>))
 import qualified Compat.Aeson
 import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
+import qualified Codec.Binary.UTF8.String as UTF8
+import qualified Data.ByteString.Lazy as BSL
 
 -- | A fully qualified type constructor used by /Haskell Function Graph/.
 --
@@ -99,6 +101,17 @@ instance Functor FgType where
     FgType_Unit ->
       FgType_Unit
 
+instance Traversable FgType where
+  traverse f = \case
+    FgType_TyConApp tycon tyList ->
+      FgType_TyConApp <$> f tycon <*> traverse (traverse f) tyList
+    FgType_List bty ->
+      FgType_List <$> traverse f bty
+    FgType_Tuple boxity bty neBty ->
+      FgType_Tuple boxity <$> traverse f bty <*> traverse (traverse f) neBty
+    FgType_Unit ->
+      pure FgType_Unit
+
 data Boxity
   = Boxed
   | Unboxed
@@ -126,38 +139,54 @@ instance A.FromJSON Boxity where
 instance (A.ToJSON tycon) => A.ToJSON (FgType tycon) where
   toJSON = \case
     FgType_TyConApp tycon tyList -> A.object
-      [("type", A.toJSON [("tycon" :: Compat.Aeson.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
+      [("type", A.object [("tycon" :: Compat.Aeson.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
     FgType_List bty -> A.object
       [("list", A.toJSON bty)]
     FgType_Tuple boxity bty neBty ->
       let key = case boxity of {Unboxed -> "tuple#"; Boxed -> "tuple"}
       in A.object
         [(key, A.toJSON $ bty : NE.toList neBty)]
-    FgType_Unit -> A.object [("unit", A.toJSON ())]
+    FgType_Unit -> A.String "unit"
 
 instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
-  parseJSON = A.withObject "FgType" $ \o -> do
-        parseKind o "type" (\o' ->  FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args")
-    <|> parseKind o "list" (pure . FgType_List)
-    <|> parseKind o "tuple" (tupleFromList Boxed)
-    <|> parseKind o "tuple#" (tupleFromList Unboxed)
-    <|> parseKind o "unit" (\(_ :: ()) -> pure FgType_Unit)
-      where
-        -- apply function to value if (key,value) exists in the object
-        parseKind
-          :: A.FromJSON a
-          => A.Object
-          -> Compat.Aeson.Key
-          -> (a -> A.Parser (FgType tycon))
-          -> A.Parser (FgType tycon)
-        parseKind o keyTxt mkType =
-          maybe empty (A.parseJSON >=> mkType) (Compat.Aeson.lookup keyTxt o)
+  parseJSON = \case
+    A.String "unit" -> pure FgType_Unit
+    A.Object o -> parseObject o
+    val -> failParse val
+    where
+      parseObject o = do
+            parseKind o "type" (\o' ->  FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args")
+        <|> parseKind o "list" (pure . FgType_List)
+        <|> parseKind o "tuple" (tupleFromList Boxed)
+        <|> parseKind o "tuple#" (tupleFromList Unboxed)
+        <|> failParse (A.Object o)
 
-        tupleFromList boxity = \case
-          ty1:ty2:tyTail ->
-            pure $ FgType_Tuple boxity ty1 (ty2 NE.:| tyTail)
-          other ->
-            fail $ "Tuple size must be >= 2 but size is: " <> show (length other)
+      failParse val = fail $ unwords
+        [ "expected one of:"
+        , "the string 'unit',"
+        , "an object with one of the keys"
+        , "'type',"
+        , "'list',"
+        , "'tuple',"
+        , "'tuple#'."
+        , "found:" , UTF8.decode . BSL.unpack $ A.encode val
+        ]
+
+      -- apply function to value if (key,value) exists in the object
+      parseKind
+        :: A.FromJSON a
+        => A.Object
+        -> Compat.Aeson.Key
+        -> (a -> A.Parser (FgType tycon))
+        -> A.Parser (FgType tycon)
+      parseKind o keyTxt mkType =
+        maybe empty (A.parseJSON >=> mkType) (Compat.Aeson.lookup keyTxt o)
+
+      tupleFromList boxity = \case
+        ty1:ty2:tyTail ->
+          pure $ FgType_Tuple boxity ty1 (ty2 NE.:| tyTail)
+        other ->
+          fail $ "Tuple size must be >= 2 but size is: " <> show (length other)
 
 instance NFData Boxity
 instance (NFData tycon) => NFData (FgType tycon)

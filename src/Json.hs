@@ -55,8 +55,8 @@ instance Traversable FunctionType where
     FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
 
 data TypeInfo tycon = TypeInfo
-  { typeInfo_fullyQualified :: FunctionType (FgType tycon)
-  , typeInfo_tmpUnexpanded :: FunctionType (FgType tycon) -- ^ TODO: contains type synonyms
+  { typeInfo_fullyQualified :: FunctionType tycon
+  , typeInfo_tmpUnexpanded :: FunctionType tycon -- ^ TODO: contains type synonyms
   } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
 instance (A.ToJSON tycon) => A.ToJSON (TypeInfo tycon)
@@ -64,10 +64,13 @@ instance (A.FromJSON tycon) => A.FromJSON (TypeInfo tycon)
 instance (NFData tycon) => NFData (TypeInfo tycon)
 
 instance Traversable TypeInfo where
-  traverse f ti = error "TODO"
+  traverse f ti =
+    TypeInfo
+      <$> traverse f (typeInfo_fullyQualified ti)
+      <*> traverse f (typeInfo_tmpUnexpanded ti)
 
 data ModuleDeclarations value = ModuleDeclarations
-  { moduleDeclarations_map :: Map value (Map value (TypeInfo (FgTyCon value)))
+  { moduleDeclarations_map :: Map value (Map value (TypeInfo (FgType (FgTyCon value))))
     -- ^ Map from module name to a map of unqualified function names to 'TypeInfo'
   , moduleDeclarations_mapFail :: Map value (Map value TyConParseError)
     -- ^ TODO: failures
@@ -83,12 +86,12 @@ fmapModuleDeclarations
   -> ModuleDeclarations a
   -> ModuleDeclarations b
 fmapModuleDeclarations f (ModuleDeclarations map' mapFail) = ModuleDeclarations
-  (Map.mapKeys f (fmap (Map.mapKeys f . fmap (fmap (fmap f))) map'))
+  (Map.mapKeys f (fmap (Map.mapKeys f . fmap (fmap (fmap (fmap f)))) map'))
   (Map.mapKeys f (fmap (Map.mapKeys f) mapFail))
 
 explodeModuleDeclarations
   :: ModuleDeclarations value
-  -> [(value, (value, TypeInfo (FgTyCon value)))]
+  -> [(value, (value, TypeInfo (FgType (FgTyCon value))))]
 explodeModuleDeclarations =
   concatMap (\(value, lst) -> map (value,) lst)
     . Map.toList

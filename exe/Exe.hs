@@ -28,7 +28,7 @@ import GHC.Types.Var (varName, varType)
 import Data.Function (on)
 import Data.List (sortBy)
 import System.Environment (getArgs)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, unless)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.List.NonEmpty as NE
@@ -60,10 +60,16 @@ main = do
   lst <- forM pkg_names $ \pkg_nm -> do
     unsafeInterleaveIO $ runGhc' (getDefinitions pprFun pkg_nm) >>= logErrors
   let declarationMapJsonList = map (declarationMapToJson pprFun) (catMaybes lst)
-  forM_ declarationMapJsonList $ \lol ->
-    logError $ unwords $
-      ("Parse failures in '" <> T.unpack (Json.declarationMapJson_package lol) <> "':")
-      : map unTyConParseError (concat $ Map.elems $ Map.elems <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations lol))
+  forM_ declarationMapJsonList $ \declarationMapJson -> do
+    let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
+    forM_ errors $ \(modName, pkgErrs) ->
+      forM_ pkgErrs $ \(defnName, err) ->
+        logError $ ("WARNING: " <>) $ unwords
+          [ "Parse failure in"
+          , T.unpack $ Json.declarationMapJson_package declarationMapJson <> "."
+          , T.unpack $ modName <> "." <> defnName
+          , unTyConParseError err
+          ]
   Json.streamPrintJsonList declarationMapJsonList
   where
     reallyCatch :: IO a -> IO (Either Control.Exception.SomeException a)
@@ -180,7 +186,7 @@ declarationMapToJson
   -> Json.DeclarationMapJson T.Text
 declarationMapToJson pprFun dm =
   let
-    eitherMap :: Map T.Text (Map T.Text (Either TyConParseError (Json.TypeInfo (FgTyCon T.Text))))
+    eitherMap :: Map T.Text (Map T.Text (Either TyConParseError (Json.TypeInfo (FgType (FgTyCon T.Text)))))
     eitherMap = mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
       ( fullyQualify' modName
       , mapMapMaybe nameMap $ \(name, functionType) ->
@@ -214,14 +220,15 @@ declarationMapToJson pprFun dm =
     funtionTypeToTypeInfo
       :: (ModuleName, Name) -- for debugging purposes
       -> Json.FunctionType Type
-      -> Maybe (Either TyConParseError (Json.TypeInfo (FgTyCon T.Text)))
+      -> Maybe (Either TyConParseError (Json.TypeInfo (FgType (FgTyCon T.Text))))
     funtionTypeToTypeInfo dbg funType = do
       funTyExpanded <- traverse (toBuiltinType . expandTypeSynonyms) funType
       funTy <- traverse toBuiltinType funType
-      pure $ traverse (tyConToFgTyCon dbg) $ Json.TypeInfo
-        { Json.typeInfo_fullyQualified = funTyExpanded
-        , Json.typeInfo_tmpUnexpanded = funTy
-        }
+      let funTypeInfo = Json.TypeInfo
+            { Json.typeInfo_fullyQualified = funTyExpanded
+            , Json.typeInfo_tmpUnexpanded = funTy
+            }
+      pure $ traverse (traverse (tyConToFgTyCon dbg)) funTypeInfo
 
     fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . fullyQualify
