@@ -14,6 +14,7 @@ import qualified Test.Hspec
 import Test.Hspec.Expectations.Pretty (shouldNotBe, shouldBe)
 import Data.Maybe (fromJust)
 import qualified Data.Map as Map
+import qualified Data.List.NonEmpty as NE
 
 main :: IO ()
 main = do
@@ -29,38 +30,19 @@ main = do
 
 spec :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
 spec declarationMapJson =
-  Test.Hspec.describe "Expected TypeInfo" $
-    Test.Hspec.it "System.IO.putStrLn" $ do
-      let mBaseDeclarationMapJson = lookupOn ((== "base-4.18.0.0") . Json.declarationMapJson_package) declarationMapJson
-          baseDeclarationMapJson = fromJust mBaseDeclarationMapJson
-      mBaseDeclarationMapJson `shouldNotBe` Nothing
-      let modDecls = Json.declarationMapJson_moduleDeclarations baseDeclarationMapJson
-          map' = Json.moduleDeclarations_map modDecls
-          mDefnMap = Map.lookup "System.IO" map'
-          mTypeInfo = mDefnMap >>= Map.lookup "putStrLn"
-          typeInfo = fromJust mTypeInfo
-      mTypeInfo `shouldNotBe` Nothing
-      typeInfo `shouldBe` tiPutStrLn
+  Test.Hspec.describe "Expected TypeInfo" $ do
+    specPutStrLn declarationMapJson
+    specUnsnoc declarationMapJson
+
+-- | System.IO.putStrLn :: String -> IO ()
+specPutStrLn :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
+specPutStrLn =
+    mkSpec "base-4.18.0.0" "System.IO" "putStrLn" tiPutStrLn
   where
-    tyConIO = Types.FgTyCon
-      { Types.fgTyConName = "IO"
-      , Types.fgTyConModule = "GHC.Types"
-      , Types.fgTyConPackageName = "ghc-prim"
-      , Types.fgTyConPackageVersion = "0.10.0"
-      }
-    tyConString = Types.FgTyCon
-      { Types.fgTyConName = "String"
-      , Types.fgTyConModule = "GHC.Base"
-      , Types.fgTyConPackageName = "base"
-      , Types.fgTyConPackageVersion = "4.18.0.0"
-      }
-    tyConChar = Types.FgTyCon
-      { Types.fgTyConName = "Char"
-      , Types.fgTyConModule = "GHC.Types"
-      , Types.fgTyConPackageName = "ghc-prim"
-      , Types.fgTyConPackageVersion = "0.10.0"
-      }
+    tyConIO = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
+    tyConString = parsePprTyCon "base-4.18.0.0:GHC.Base.String"
     tyConAppIOUnit = Types.FgType_TyConApp tyConIO [Types.FgType_Unit] -- IO ()
+
     tiPutStrLn =
       Json.TypeInfo
         { Json.typeInfo_fullyQualified = Json.FunctionType
@@ -73,8 +55,57 @@ spec declarationMapJson =
             }
         }
 
+-- | Data.Text.unsnoc :: Text -> Maybe (Text, Char)
+specUnsnoc :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
+specUnsnoc =
+    mkSpec "text-2.0.2" "Data.Text" "unsnoc" tiUnsnoc
+  where
+    tyConText = parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
+    fgTypeText = Types.FgType_TyConApp tyConText []
+    fgTypeChar = Types.FgType_TyConApp tyConChar []
+    tyConMaybe = parsePprTyCon "base-4.18.0.0:GHC.Maybe.Maybe"
+
+    funtionType = Json.FunctionType
+      { Json.functionType_arg = fgTypeText
+      , Json.functionType_ret = Types.FgType_TyConApp
+          tyConMaybe
+          [Types.FgType_Tuple Types.Boxed fgTypeText (NE.singleton fgTypeChar)]
+      }
+
+    tiUnsnoc =
+      Json.TypeInfo
+        { Json.typeInfo_fullyQualified = funtionType
+        , Json.typeInfo_tmpUnexpanded = funtionType
+        }
+
+mkSpec
+  :: T.Text -- Package with version (e.g. @base-4.18.0.0@)
+  -> T.Text -- Module name (e.g. @System.IO@)
+  -> T.Text -- Definition name (e.g. @putStrLn@)
+  -> Json.TypeInfo (Types.FgType (Types.FgTyCon T.Text))
+  -> [Json.DeclarationMapJson T.Text]
+  -> Test.Hspec.Spec
+mkSpec pkgName modName defnName expected declarationMapJson =
+  Test.Hspec.it (T.unpack $ modName <> "." <> defnName) $ do
+    let mBaseDeclarationMapJson = lookupOn ((== pkgName) . Json.declarationMapJson_package) declarationMapJson
+        baseDeclarationMapJson = fromJust mBaseDeclarationMapJson
+    mBaseDeclarationMapJson `shouldNotBe` Nothing
+    let modDecls = Json.declarationMapJson_moduleDeclarations baseDeclarationMapJson
+        map' = Json.moduleDeclarations_map modDecls
+        mDefnMap = Map.lookup modName map'
+        mTypeInfo = mDefnMap >>= Map.lookup defnName
+        typeInfo = fromJust mTypeInfo
+    mTypeInfo `shouldNotBe` Nothing
+    typeInfo `shouldBe` expected
+
+parsePprTyCon :: T.Text -> Types.FgTyCon T.Text
+parsePprTyCon = either error id . Types.parsePprTyCon
+
 lookupOn :: (a -> Bool) -> [a] -> Maybe a
 lookupOn _ [] =  Nothing
 lookupOn f  (x:xs)
     | f x = Just x
     | otherwise = lookupOn f xs
+
+tyConChar :: Types.FgTyCon T.Text
+tyConChar = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.Char"

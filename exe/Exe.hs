@@ -65,9 +65,9 @@ main = do
     forM_ errors $ \(modName, pkgErrs) ->
       forM_ pkgErrs $ \(defnName, err) ->
         logError $ ("WARNING: " <>) $ unwords
-          [ "Parse failure in"
+          [ "Parse failure for package"
           , T.unpack $ Json.declarationMapJson_package declarationMapJson <> "."
-          , T.unpack $ modName <> "." <> defnName
+          , "Definition:", T.unpack $ modName <> "." <> defnName <> ":"
           , unTyConParseError err
           ]
   Json.streamPrintJsonList declarationMapJsonList
@@ -222,8 +222,8 @@ declarationMapToJson pprFun dm =
       -> Json.FunctionType Type
       -> Maybe (Either TyConParseError (Json.TypeInfo (FgType (FgTyCon T.Text))))
     funtionTypeToTypeInfo dbg funType = do
-      funTyExpanded <- traverse (toBuiltinType . expandTypeSynonyms) funType
-      funTy <- traverse toBuiltinType funType
+      funTyExpanded <- traverse (toFgType . expandTypeSynonyms) funType
+      funTy <- traverse toFgType funType
       let funTypeInfo = Json.TypeInfo
             { Json.typeInfo_fullyQualified = funTyExpanded
             , Json.typeInfo_tmpUnexpanded = funTy
@@ -278,62 +278,20 @@ noQualify =
         , queryPromotionTick = const True
         }
 
--- | Parse a 'FgTyCon' from a 'TyCon' pretty-printed in fully-qualified form
---  (e.g. "base-4.18.0.0:Data.Either.Either").
---
--- NOTE: Does not handle the /built-in/ types: list, tuple (including unit).
---
--- A 'Left' signifies a bug in the parser.
---
--- Examples:
---
--- >>> parsePprTyCon "base-4.18.0.0:Data.Either.Either"
--- Right (FgTyCon {fgTyConName = "Either", fgTyConModule = "Data.Either", fgTyConPackageName = "base", fgTyConPackageVersion = "4.18.0.0"})
---
--- >>> parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
--- Right (FgTyCon {fgTyConName = "Text", fgTyConModule = "Data.Text.Internal", fgTyConPackageName = "text", fgTyConPackageVersion = "2.0.2"})
---
--- >>> parsePprTyCon "base-4.18.0.0:GHC.Maybe.Maybe"
--- Right (FgTyCon {fgTyConName = "Maybe", fgTyConModule = "GHC.Maybe", fgTyConPackageName = "base", fgTyConPackageVersion = "4.18.0.0"})
-parsePprTyCon :: T.Text -> Either String (FgTyCon T.Text)
-parsePprTyCon str = do
-  (packageAndVersion, fqn) <- case T.splitOn ":" str of
-    [packageAndVersion, fqn] -> pure (packageAndVersion, fqn)
-    _ -> Left $ "missing colon in " <> show (T.unpack str)
-  (packageName, packageVersion) <-
-    splitByNonEmpty "invalid package identifier" '-' packageAndVersion
-  (moduleName, name) <-
-    splitByNonEmpty "invalid fully qualified identifier" '.' fqn
-  pure $ FgTyCon
-    { fgTyConName = name
-    , fgTyConModule = moduleName
-    , fgTyConPackageName = packageName
-    , fgTyConPackageVersion = packageVersion
-    }
-  where
-    -- split by "char" and return pair of non-empty text strings
-    splitByNonEmpty err char str =
-      case T.spanEndM (pure . (/= char)) str of
-        Identity (a', b)
-          | Just (a, char) <- T.unsnoc a' -- remove trailing "char"
-          , not (T.null b) && not (T.null a) ->
-            pure (a, b)
-        _ -> Left $ err <> " in " <> show (T.unpack str)
-
--- | Convert a 'TyConApp' 'Type' to a 'FgType'
-toBuiltinType :: Type -> Maybe (FgType TyCon)
-toBuiltinType !ty = case ty of
+-- | Convert a 'Type' to a 'FgType'. Only 'TyConApp' is supported currently.
+toFgType :: Type -> Maybe (FgType TyCon)
+toFgType !ty = case ty of
   TyConApp tyCon [] | isTupleTyCon tyCon -> do -- unit
       pure FgType_Unit
   TyConApp tyCon (ty1:ty2:tyTail) | Just boxity <- tupleBoxity tyCon -> do -- tuple (of size >= 2)
-      ty1' <- toBuiltinType ty1
-      tyTail' <- mapM toBuiltinType (ty2 NE.:| tyTail)
+      ty1' <- toFgType ty1
+      tyTail' <- mapM toFgType (ty2 NE.:| tyTail)
       pure $ FgType_Tuple boxity ty1' tyTail'
   TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> do -- list
-    ty1' <- toBuiltinType ty1
+    ty1' <- toFgType ty1
     pure $ FgType_List ty1'
   TyConApp tyCon tyList -> do -- neither a tuple nor a list
-    tyList' <- mapM toBuiltinType tyList
+    tyList' <- mapM toFgType tyList
     pure $ FgType_TyConApp tyCon tyList'
   _ -> Nothing
   where

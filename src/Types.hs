@@ -12,7 +12,7 @@
 module Types
 ( FgType(..)
 , Boxity(..)
-, FgTyCon(..), TyConParseError(..)
+, FgTyCon(..), parsePprTyCon, TyConParseError(..)
 , isBoxed
 )
 where
@@ -28,6 +28,7 @@ import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
 import qualified Codec.Binary.UTF8.String as UTF8
 import qualified Data.ByteString.Lazy as BSL
+import Data.Functor.Identity (Identity(Identity))
 
 -- | A fully qualified type constructor used by /Haskell Function Graph/.
 --
@@ -190,3 +191,45 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
 
 instance NFData Boxity
 instance (NFData tycon) => NFData (FgType tycon)
+
+-- | Parse a 'FgTyCon' from a GHC @TyCon@ pretty-printed in fully-qualified form
+--  (e.g. "base-4.18.0.0:Data.Either.Either").
+--
+-- NOTE: Does not handle the /built-in/ types: list, tuple (including unit).
+--
+-- A 'Left' signifies a bug in the parser.
+--
+-- Examples:
+--
+-- >>> parsePprTyCon "base-4.18.0.0:Data.Either.Either"
+-- Right (FgTyCon {fgTyConName = "Either", fgTyConModule = "Data.Either", fgTyConPackageName = "base", fgTyConPackageVersion = "4.18.0.0"})
+--
+-- >>> parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
+-- Right (FgTyCon {fgTyConName = "Text", fgTyConModule = "Data.Text.Internal", fgTyConPackageName = "text", fgTyConPackageVersion = "2.0.2"})
+--
+-- >>> parsePprTyCon "base-4.18.0.0:GHC.Maybe.Maybe"
+-- Right (FgTyCon {fgTyConName = "Maybe", fgTyConModule = "GHC.Maybe", fgTyConPackageName = "base", fgTyConPackageVersion = "4.18.0.0"})
+parsePprTyCon :: T.Text -> Either String (FgTyCon T.Text)
+parsePprTyCon str = do
+  (packageAndVersion, fqn) <- case T.splitOn ":" str of
+    [packageAndVersion, fqn] -> pure (packageAndVersion, fqn)
+    _ -> Left $ "missing colon in " <> show (T.unpack str)
+  (packageName, packageVersion) <-
+    splitByNonEmpty "invalid package identifier" '-' packageAndVersion
+  (moduleName, name) <-
+    splitByNonEmpty "invalid fully qualified identifier" '.' fqn
+  pure $ FgTyCon
+    { fgTyConName = name
+    , fgTyConModule = moduleName
+    , fgTyConPackageName = packageName
+    , fgTyConPackageVersion = packageVersion
+    }
+  where
+    -- split by "char" and return pair of non-empty text strings
+    splitByNonEmpty err char str' =
+      case T.spanEndM (pure . (/= char)) str' of
+        Identity (a', b)
+          | Just (a, _) <- T.unsnoc a' -- remove trailing "char"
+          , not (T.null b) && not (T.null a) ->
+            pure (a, b)
+        _ -> Left $ err <> " in " <> show (T.unpack str')
