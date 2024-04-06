@@ -56,4 +56,5 @@ jobs:
         run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)'
 
       - name: Run test suite
-        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE test'
+        # test suite tests exe (so only GHC 9.6.2)
+        run: if [[ "${{ matrix.nixShell }}" == "shell.nix" ]]; then nix-shell "${{ matrix.nixShell }}" --run 'cabal --project-file=$CABAL_PROJECT_FILE test'; else echo "Not running test suite for shell file ${{ matrix.nixShell }}"; fi
