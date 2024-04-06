@@ -53,7 +53,8 @@ jobs:
         run: if [[ "${{ matrix.nixShell }}" == "shell.nix" ]]; then nix-shell "${{ matrix.nixShell }}" --run 'cabal --project-file=$CABAL_PROJECT_FILE build exe:dump-decls'; else echo "Not building exe for shell file ${{ matrix.nixShell }}"; fi
 
       - name: Test run of 'dump-decls' executable
-        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)'
+        # exe only builds with GHC 9.6.2 currently
+        run: if [[ "${{ matrix.nixShell }}" == "shell.nix" ]]; then nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)'; else echo "Not building exe for shell file ${{ matrix.nixShell }}"; fi
 
       - name: Run test suite
         # test suite tests exe (so only GHC 9.6.2)
