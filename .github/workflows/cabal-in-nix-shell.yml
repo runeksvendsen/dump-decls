@@ -82,6 +82,9 @@ jobs:
       - name: Set shell Bash
         run: echo "NIX_BUILD_SHELL=$(nix-build -A pkgs.bash nix/pkgs.nix)/bin/bash" >> $GITHUB_ENV
 
+      - name: Run 'cabal update'
+        run: nix-shell --run 'cabal update'
+
       - name: Build 'dump-decls' executable
         run: nix-shell --run 'cabal build exe:dump-decls'
 
