@@ -219,17 +219,17 @@ parsePackageWithVersion packageAndVersion = do
 --
 -- Examples:
 --
--- >>> :seti -XOverloadedStrings
+-- >>> :set -XOverloadedStrings
 -- >>> parsePprTyCon "base-4.18.0.0:Data.Either.Either"
--- Right (FgTyCon {fgTyConName = "Either", fgTyConModule = "Data.Either", fgTyConPackageName = "base", fgTyConPackageVersion = "4.18.0.0"})
+-- Right (FgTyCon {fgTyConName = "Either", fgTyConModule = "Data.Either", fgTyConPackage = FgPackage {fgPackageName = "base", fgPackageVersion = "4.18.0.0"}})
 --
--- >>> :seti -XOverloadedStrings
+-- >>> :set -XOverloadedStrings
 -- >>> parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
--- Right (FgTyCon {fgTyConName = "Text", fgTyConModule = "Data.Text.Internal", fgTyConPackageName = "text", fgTyConPackageVersion = "2.0.2"})
+-- Right (FgTyCon {fgTyConName = "Text", fgTyConModule = "Data.Text.Internal", fgTyConPackage = FgPackage {fgPackageName = "text", fgPackageVersion = "2.0.2"}})
 --
--- >>> :seti -XOverloadedStrings
+-- >>> :set -XOverloadedStrings
 -- >>> parsePprTyCon "base-4.18.0.0:GHC.Maybe.Maybe"
--- Right (FgTyCon {fgTyConName = "Maybe", fgTyConModule = "GHC.Maybe", fgTyConPackageName = "base", fgTyConPackageVersion = "4.18.0.0"})
+-- Right (FgTyCon {fgTyConName = "Maybe", fgTyConModule = "GHC.Maybe", fgTyConPackage = FgPackage {fgPackageName = "base", fgPackageVersion = "4.18.0.0"}})
 parsePprTyCon :: T.Text -> Either String (FgTyCon T.Text)
 parsePprTyCon str = do
   (packageAndVersion, fqn) <- case T.splitOn ":" str of
