@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  build_init:
+  build_library:
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-20.04, macos-13, macos-12, macos-11]
@@ -59,3 +59,46 @@ jobs:
       - name: Run test suite
         # test suite tests exe (so only GHC 9.6.2)
         run: if [[ "${{ matrix.nixShell }}" == "shell.nix" ]]; then nix-shell "${{ matrix.nixShell }}" --run 'cabal --project-file=$CABAL_PROJECT_FILE test'; else echo "Not running test suite for shell file ${{ matrix.nixShell }}"; fi
+
+  build_test_exe:
+    needs: build_library
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-20.04, macos-13, macos-12, macos-11]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v25
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.13.3/install
+          extra_nix_config: |
+            substituters = https://cache.nixos.org https://cache.iog.io
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            system-features = benchmark big-parallel kvm nixos-test
+
+      - name: Cache cabal stuff
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cabal/packages
+            ~/.cabal/store
+            dist-newstyle
+          key: ${{ runner.os }}-${{ matrix.os }}-${{ hashFiles('**/*.cabal', '**/cabal.project', '**/cabal.project.freeze') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.os }}-
+
+      # Make nix-shell use specific Bash version.
+      # Cf. https://nixos.org/manual/nix/stable/command-ref/nix-shell#environment-variables.
+      - name: Set shell Bash
+        run: echo "NIX_BUILD_SHELL=$(nix-build -A pkgs.bash nix/pkgs.nix)/bin/bash" >> $GITHUB_ENV
+
+      - name: Build 'dump-decls' executable
+        run: cabal build exe:dump-decls
+
+      - name: Test run of 'dump-decls' executable
+        run: cabal run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)
+
+      - name: Run test suite
+        run: cabal test
