@@ -83,10 +83,10 @@ jobs:
         run: echo "NIX_BUILD_SHELL=$(nix-build -A pkgs.bash nix/pkgs.nix)/bin/bash" >> $GITHUB_ENV
 
       - name: Build 'dump-decls' executable
-        run: cabal build exe:dump-decls
+        run: nix-shell --run 'cabal build exe:dump-decls'
 
       - name: Test run of 'dump-decls' executable
-        run: cabal run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)
+        run: nix-shell --run 'cabal run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)'
 
       - name: Run test suite
-        run: cabal test
+        run: nix-shell --run 'cabal test'
