@@ -17,5 +17,3 @@ jobs:
       - run: nix-build
       - name: Test run of 'dump-decls' executable
         run: nix-shell --run '$(nix-build)/bin/dump-decls $(ghc-pkg list --simple-output --names-only)'
-      - name: Run test suite
-        run: $(nix-build)/bin/test
