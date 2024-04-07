@@ -219,12 +219,15 @@ parsePackageWithVersion packageAndVersion = do
 --
 -- Examples:
 --
+-- >>> :seti -XOverloadedStrings
 -- >>> parsePprTyCon "base-4.18.0.0:Data.Either.Either"
 -- Right (FgTyCon {fgTyConName = "Either", fgTyConModule = "Data.Either", fgTyConPackageName = "base", fgTyConPackageVersion = "4.18.0.0"})
 --
+-- >>> :seti -XOverloadedStrings
 -- >>> parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
 -- Right (FgTyCon {fgTyConName = "Text", fgTyConModule = "Data.Text.Internal", fgTyConPackageName = "text", fgTyConPackageVersion = "2.0.2"})
 --
+-- >>> :seti -XOverloadedStrings
 -- >>> parsePprTyCon "base-4.18.0.0:GHC.Maybe.Maybe"
 -- Right (FgTyCon {fgTyConName = "Maybe", fgTyConModule = "GHC.Maybe", fgTyConPackageName = "base", fgTyConPackageVersion = "4.18.0.0"})
 parsePprTyCon :: T.Text -> Either String (FgTyCon T.Text)
@@ -245,6 +248,7 @@ parsePprTyCon str = do
 --   Return pair of non-empty text strings before and after character (neither string includes the character).
 --
 -- Example:
+-- >>> :seti -XOverloadedStrings
 -- >>> splitByEndNonEmpty "oops" '.' "Data.ByteString.Lazy.Internal.ByteString"
 -- Right ("Data.ByteString.Lazy.Internal","ByteString")
 splitByEndNonEmpty
