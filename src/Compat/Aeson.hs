@@ -18,6 +18,7 @@ import Data.Functor.Identity (Identity(runIdentity))
 import qualified Data.HashMap.Strict as Lookup
 import qualified Data.Text as T
 import Data.Bifunctor (bimap)
+import qualified Data.Tuple
 type Key = T.Text
 #endif
 
@@ -29,8 +30,8 @@ spanEnd
   -> T.Text
   -> (T.Text, T.Text)
 spanEnd p =
-#if MIN_VERSION_aeson(2,0,1)
+#if MIN_VERSION_text(2,0,1)
   runIdentity . T.spanEndM (pure . p)
 #else
-  bimap T.reverse T.reverse . T.span p . T.reverse
+  Data.Tuple.swap . bimap T.reverse T.reverse . T.span p . T.reverse
 #endif
