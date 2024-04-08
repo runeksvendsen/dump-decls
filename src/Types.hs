@@ -16,6 +16,8 @@ module Types
 , FgTyCon(..), parsePprTyCon, TyConParseError(..)
 , FgPackage(..), parsePackageWithVersion
 , isBoxed
+  -- * For testing
+, splitByEndNonEmpty
 )
 where
 
@@ -62,7 +64,7 @@ instance (A.ToJSON a) => A.ToJSON (FgPackage a)
 instance (A.FromJSON a) => A.FromJSON (FgPackage a)
 instance (NFData a) => NFData (FgPackage a)
 
--- | An error converting a GHC TyCon into an 'FgTyCon'
+-- | An error converting a 'GHC.Core.TyCon.TyCon' into an 'FgTyCon'
 data TyConParseError = TyConParseError { unTyConParseError:: String } -- TODO: not just a String
   deriving (Eq, Show, Ord, Generic)
 
@@ -202,6 +204,7 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
 instance NFData Boxity
 instance (NFData tycon) => NFData (FgType tycon)
 
+-- | TODO
 parsePackageWithVersion
   :: T.Text
   -> Either String (FgPackage T.Text)
@@ -210,7 +213,7 @@ parsePackageWithVersion packageAndVersion = do
     splitByEndNonEmpty "invalid package identifier" '-' packageAndVersion
   pure $ FgPackage packageName packageVersion
 
--- | Parse a 'FgTyCon' from a GHC @TyCon@ pretty-printed in fully-qualified form
+-- | Parse a 'FgTyCon' from a 'GHC.Core.TyCon.TyCon' pretty-printed in fully-qualified form
 --  (e.g. "base-4.18.0.0:Data.Either.Either").
 --
 -- NOTE: Does not handle the /built-in/ types: list, tuple (including unit).
