@@ -1,15 +1,13 @@
 { pkgs ? (import ./nix/pkgs.nix).pkgs
 , hls-version ? "2.6.0.0"
 , exe-dir-expression ? "$(pwd)/hls"
-, shellNixFile ? ./shell.nix
 }:
 let nix = pkgs.nixVersions.nix_2_14;
     coreutils = pkgs.coreutils;
     realpath = "${coreutils}/bin/realpath";
 in
 pkgs.writeScriptBin "build-hls.sh" ''
-    #! /usr/bin/env nix-shell
-    #! nix-shell -i bash ${shellNixFile}
+    #!${pkgs.bash}/bin/bash
 
     set -e
 
