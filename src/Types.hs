@@ -248,7 +248,7 @@ parsePprTyCon str = do
 --   Return pair of non-empty text strings before and after character (neither string includes the character).
 --
 -- Example:
--- >>> :seti -XOverloadedStrings
+-- >>> :set -XOverloadedStrings
 -- >>> splitByEndNonEmpty "oops" '.' "Data.ByteString.Lazy.Internal.ByteString"
 -- Right ("Data.ByteString.Lazy.Internal","ByteString")
 splitByEndNonEmpty
