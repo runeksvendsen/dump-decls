@@ -204,7 +204,17 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
 instance NFData Boxity
 instance (NFData tycon) => NFData (FgType tycon)
 
--- | TODO
+-- | Parse a 'FgPackage' from a string of the form /package_name-package_version/.
+--
+-- Examples:
+--
+-- >>> :set -XOverloadedStrings
+-- >>> parsePackageWithVersion "base-4.18.0.0"
+-- Right (FgPackage {fgPackageName = "base", fgPackageVersion = "4.18.0.0"})
+--
+-- >>> :set -XOverloadedStrings
+-- >>> parsePackageWithVersion "text-2.0.2"
+-- Right (FgPackage {fgPackageName = "text", fgPackageVersion = "2.0.2"})
 parsePackageWithVersion
   :: T.Text
   -> Either String (FgPackage T.Text)

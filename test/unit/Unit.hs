@@ -24,3 +24,12 @@ main = hspec $
       it "ByteString" $
         splitByEndNonEmpty "oops" '.' "Data.ByteString.Lazy.Internal.ByteString"
           `shouldBe` Right ("Data.ByteString.Lazy.Internal","ByteString")
+
+    describe "parsePackageWithVersion" $ do
+      it "base" $
+        parsePackageWithVersion "base-4.18.0.0"
+          `shouldBe` Right (FgPackage {fgPackageName = "base", fgPackageVersion = "4.18.0.0"})
+
+      it "text" $
+        parsePackageWithVersion "text-2.0.2"
+          `shouldBe` Right (FgPackage {fgPackageName = "text", fgPackageVersion = "2.0.2"})
