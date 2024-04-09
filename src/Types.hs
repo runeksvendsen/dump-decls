@@ -13,8 +13,8 @@
 module Types
 ( FgType(..)
 , Boxity(..)
-, FgTyCon(..), parsePprTyCon, TyConParseError(..)
-, FgPackage(..), parsePackageWithVersion
+, FgTyCon(..), parsePprTyCon, TyConParseError(..), renderTyConParseError
+, FgPackage(..), parsePackageWithVersion, renderFgPackage
 , isBoxed
   -- * For testing
 , splitByEndNonEmpty
@@ -64,13 +64,42 @@ instance (A.ToJSON a) => A.ToJSON (FgPackage a)
 instance (A.FromJSON a) => A.FromJSON (FgPackage a)
 instance (NFData a) => NFData (FgPackage a)
 
+-- | Inverse of 'parsePackageWithVersion'
+renderFgPackage
+  :: FgPackage T.Text
+  -> T.Text
+renderFgPackage p =
+  fgPackageName p <> "-" <> fgPackageVersion p
+
 -- | An error converting a 'GHC.Core.TyCon.TyCon' into an 'FgTyCon'
-data TyConParseError = TyConParseError { unTyConParseError:: String } -- TODO: not just a String
-  deriving (Eq, Show, Ord, Generic)
+data TyConParseError = TyConParseError
+  { tyConParseErrorMsg :: String
+    -- ^ A human-readable message about what failed
+  , tyConParseErrorInput :: T.Text
+    -- ^ The pretty-printed 'GHC.Core.TyCon.TyCon' for which parsing failed
+  , tyConParseErrorFunctionName :: T.Text
+    -- ^ Fully qualified name of the function for which the failure occurred.
+    --
+    --   The failure occurred for either this function's argument type or return type (TODO: specify which).
+  , tyConParseErrorPackage :: FgPackage T.Text
+    -- ^ The package that contains 'tyConParseErrorFunctionName'
+  , tyConParseErrorSrcLoc :: T.Text
+    -- ^ The source location of the 'GHC.Core.TyCon.TyCon'
+  } deriving (Eq, Show, Ord, Generic)
 
 instance A.ToJSON TyConParseError
 instance A.FromJSON TyConParseError
 instance NFData TyConParseError
+
+renderTyConParseError
+  :: TyConParseError
+  -> T.Text
+renderTyConParseError e = T.unwords
+  [ T.pack (tyConParseErrorMsg e) <> "."
+  , "Function:", tyConParseErrorFunctionName e <> "."
+  , "Package:", renderFgPackage (tyConParseErrorPackage e) <> "."
+  , "SrcLoc:", tyConParseErrorSrcLoc e <> "."
+  ]
 
 -- | Types supported by /Haskell Function Graph/.
 --

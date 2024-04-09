@@ -64,11 +64,10 @@ main = do
     let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
     forM_ errors $ \(modName, pkgErrs) ->
       forM_ pkgErrs $ \(defnName, err) ->
-        logError $ ("WARNING: " <>) $ unwords
-          [ "Parse failure for package"
-          , T.unpack $ "'" <> fgPackageName (Json.declarationMapJson_package declarationMapJson) <> "'."
-          , "Definition:", T.unpack $ modName <> "." <> defnName <> ":"
-          , unTyConParseError err
+        logError $ ("WARNING: " <>) $ T.unpack $ T.unwords
+          [ T.pack $ show (tyConParseErrorInput err)
+          , "failed to parse" <> "."
+          , renderTyConParseError err
           ]
   Json.streamPrintJsonList declarationMapJsonList
   where
@@ -193,10 +192,8 @@ declarationMapToJson pprFun dm =
           (noQualify' name, funtionTypeToTypeInfo (modName, name) functionType)
       )
 
-    fgPackage = either (error . ("BUG: declarationMapToJson: " <>)) id (parsePackageWithVersion $ fullyQualify' package)
-
   in Json.DeclarationMapJson
-    { Json.declarationMapJson_package = fgPackage
+    { Json.declarationMapJson_package = parsePackageFromUnitId pprFun package
     , Json.declarationMapJson_moduleDeclarations =
         Json.ModuleDeclarations
           (nonEmptyMapMap $ mapEitherRight <$> eitherMap)
@@ -237,23 +234,23 @@ declarationMapToJson pprFun dm =
     noQualify' = pprFun . noQualify
 
     tyConToFgTyCon
-      :: HasCallStack
-      => (ModuleName, Name) -- for debugging purposes
+      :: (ModuleName, Name) -- for debugging purposes
       -> TyCon
       -> Either TyConParseError (FgTyCon T.Text)
     tyConToFgTyCon (modName, functionName) tyCon =
-      first (TyConParseError . bugMsg) . parsePprTyCon . fullyQualify' $ tyCon
+      first mkTyConParseError . parsePprTyCon $ tyConPpr
       where
+        tyConPpr = fullyQualify' tyCon
+
         fullyQualify' = pprFun . fullyQualify
 
-        bugMsg e = T.unpack $ T.unwords
-          [ T.pack e <> "."
-          , "Function:", pprFun (ppr functionName) <> "."
-          , "Package:", pprFun (ppr package) <> "."
-          , "Module:", pprFun (ppr modName) <> "."
-          , "Unique:" , pprFun (ppr $ getUnique tyCon) <> "."
-          , "SrcLoc:", pprFun (ppr $ getSrcLoc tyCon) <> "."
-          ]
+        mkTyConParseError e = TyConParseError
+          { tyConParseErrorMsg = e
+          , tyConParseErrorInput = tyConPpr
+          , tyConParseErrorFunctionName = pprFun (ppr functionName)
+          , tyConParseErrorPackage = parsePackageFromUnitId pprFun package
+          , tyConParseErrorSrcLoc = pprFun (ppr $ getSrcLoc tyCon)
+          }
 
 fullyQualify :: Outputable a => a -> SDoc
 fullyQualify =
@@ -301,3 +298,12 @@ toFgType !ty = case ty of
       | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
       | isBoxedTupleTyCon tyCon = Just Types.Boxed
       | otherwise = Nothing
+
+parsePackageFromUnitId
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> FgPackage T.Text
+parsePackageFromUnitId pprFun unitId =
+  either (error . ("BUG: parsePackageFromUnitId: " <>)) id (parsePackageWithVersion $ fullyQualify' unitId)
+  where
+    fullyQualify' = pprFun . fullyQualify
