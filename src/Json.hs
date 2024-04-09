@@ -73,7 +73,8 @@ data ModuleDeclarations value = ModuleDeclarations
   { moduleDeclarations_map :: Map value (Map value (TypeInfo (FgType (FgTyCon value))))
     -- ^ Map from module name to a map of unqualified function names to 'TypeInfo'
   , moduleDeclarations_mapFail :: Map value (Map value TyConParseError)
-    -- ^ TODO: failures
+    -- ^ Declarations for which an error occurred converting a 'GHC.Core.TyCon.TyCon' into a 'FgTyCon'.
+    --   This is probably a bug in 'Types.parsePprTyCon'.
   } deriving (Eq, Show, Ord, Generic)
 
 instance (A.ToJSON a, A.ToJSONKey a) => A.ToJSON (ModuleDeclarations a)
