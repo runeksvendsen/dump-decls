@@ -64,8 +64,9 @@ main = do
     let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
     forM_ errors $ \(modName, pkgErrs) ->
       forM_ pkgErrs $ \(defnName, err) ->
-        logError $ ("WARNING: " <>) $ T.unpack $ T.unwords
-          [ T.pack $ show (tyConParseErrorInput err)
+        logError $ T.unpack $ T.unwords
+          [ "WARNING:"
+          , T.pack $ show (tyConParseErrorInput err)
           , "failed to parse" <> "."
           , renderTyConParseError err
           ]
