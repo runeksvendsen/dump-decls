@@ -45,11 +45,11 @@ specPutStrLn =
 
     tiPutStrLn =
       Json.TypeInfo
-        { Json.typeInfo_fullyQualified = Json.FunctionType
+        { Json.typeInfo_expanded = Json.FunctionType
             { Json.functionType_arg = Types.FgType_List $ Types.FgType_TyConApp tyConChar [] -- [Char]
             , Json.functionType_ret = tyConAppIOUnit
             }
-        , Json.typeInfo_tmpUnexpanded = Json.FunctionType
+        , Json.typeInfo_unexpanded = Json.FunctionType
             { Json.functionType_arg = Types.FgType_TyConApp tyConString [] -- String
             , Json.functionType_ret = tyConAppIOUnit
             }
@@ -74,8 +74,8 @@ specUnsnoc =
 
     tiUnsnoc =
       Json.TypeInfo
-        { Json.typeInfo_fullyQualified = funtionType
-        , Json.typeInfo_tmpUnexpanded = funtionType
+        { Json.typeInfo_expanded = funtionType
+        , Json.typeInfo_unexpanded = funtionType
         }
 
 mkSpec

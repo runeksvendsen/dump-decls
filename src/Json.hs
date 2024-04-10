@@ -55,8 +55,10 @@ instance Traversable FunctionType where
     FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
 
 data TypeInfo tycon = TypeInfo
-  { typeInfo_fullyQualified :: FunctionType tycon
-  , typeInfo_tmpUnexpanded :: FunctionType tycon -- ^ TODO: contains type synonyms
+  { typeInfo_expanded :: FunctionType tycon
+    -- ^ Does not contain type synonyms
+  , typeInfo_unexpanded :: FunctionType tycon
+    -- ^ Contains type synonyms
   } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
 instance (A.ToJSON tycon) => A.ToJSON (TypeInfo tycon)
@@ -66,8 +68,8 @@ instance (NFData tycon) => NFData (TypeInfo tycon)
 instance Traversable TypeInfo where
   traverse f ti =
     TypeInfo
-      <$> traverse f (typeInfo_fullyQualified ti)
-      <*> traverse f (typeInfo_tmpUnexpanded ti)
+      <$> traverse f (typeInfo_expanded ti)
+      <*> traverse f (typeInfo_unexpanded ti)
 
 data ModuleDeclarations value = ModuleDeclarations
   { moduleDeclarations_map :: Map value (Map value (TypeInfo (FgType (FgTyCon value))))

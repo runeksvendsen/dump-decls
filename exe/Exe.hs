@@ -225,8 +225,8 @@ declarationMapToJson pprFun dm =
       funTyExpanded <- traverse (toFgType . expandTypeSynonyms) funType
       funTy <- traverse toFgType funType
       let funTypeInfo = Json.TypeInfo
-            { Json.typeInfo_fullyQualified = funTyExpanded
-            , Json.typeInfo_tmpUnexpanded = funTy
+            { Json.typeInfo_expanded = funTyExpanded
+            , Json.typeInfo_unexpanded = funTy
             }
       pure $ traverse (traverse (tyConToFgTyCon dbg)) funTypeInfo
 
