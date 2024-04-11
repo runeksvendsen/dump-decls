@@ -11,13 +11,18 @@
 -- TODO: Test 'Data.Aeson.encode
 -- TODO: Merge "Types" and "JSON"?
 module Types
-( FgType(..)
+( -- * 'FgType'
+  FgType(..), renderFgType
 , Boxity(..)
-, FgTyCon(..), parsePprTyCon, TyConParseError(..), renderTyConParseError
-, FgPackage(..), parsePackageWithVersion, renderFgPackage
 , isBoxed
-  -- * For testing
-, splitByEndNonEmpty
+  -- * 'FgTyCon'
+, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, TyConParseError(..), renderTyConParseError
+  -- * Rendering 'FgType (FgTyCon T.Text)'
+, renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified
+  -- * 'FgPackage'
+, FgPackage(..), parsePackageWithVersion, renderFgPackage
+  -- * (For testing)
+, splitByEndNonEmpty,
 )
 where
 
@@ -52,6 +57,26 @@ instance (A.ToJSON a) => A.ToJSON (FgTyCon a)
 instance (A.FromJSON a) => A.FromJSON (FgTyCon a)
 instance (NFData a) => NFData (FgTyCon a)
 
+-- | Render in the format /package_name-package_version:module_name.name/.
+--   The inverse of 'parsePprTyCon'.
+--
+-- Example:
+--
+-- >>> :set -XOverloadedStrings
+-- >>> renderFgTyConQualified (FgTyCon "Text" "Data.Text.Internal" (FgPackage "text" "2.0.2"))
+-- "text-2.0.2:Data.Text.Internal.Text"
+renderFgTyConQualified
+  :: FgTyCon T.Text
+  -> T.Text
+renderFgTyConQualified tc =
+  T.concat
+    [ renderFgPackage $ fgTyConPackage tc
+    , ":"
+    , fgTyConModule tc
+    , "."
+    , fgTyConName tc
+    ]
+
 -- | A package used by /Haskell Function Graph/.
 data FgPackage text = FgPackage
   { fgPackageName :: text
@@ -78,7 +103,7 @@ data TyConParseError = TyConParseError
   , tyConParseErrorInput :: T.Text
     -- ^ The pretty-printed 'GHC.Core.TyCon.TyCon' for which parsing failed
   , tyConParseErrorFunctionName :: T.Text
-    -- ^ Fully qualified name of the function for which the failure occurred.
+    -- ^ Fully qualified name (includes module but not package) of the function for which the failure occurred.
     --
     --   The failure occurred for either this function's argument type or return type (TODO: specify which).
   , tyConParseErrorPackage :: FgPackage T.Text
@@ -91,6 +116,7 @@ instance A.ToJSON TyConParseError
 instance A.FromJSON TyConParseError
 instance NFData TyConParseError
 
+-- | Render a 'TyConParseError' as a human-readable text string
 renderTyConParseError
   :: TyConParseError
   -> T.Text
@@ -103,7 +129,7 @@ renderTyConParseError e = T.unwords
 
 -- | Types supported by /Haskell Function Graph/.
 --
---   Currently only type constructors applications are supported,
+--   Currently only type constructor applications are supported,
 --   which does not include functions (the arrow type constructor).
 --
 --   More will be added later, probably.
@@ -116,14 +142,13 @@ data FgType tycon
       tycon
       -- ^ A /type constructor/.
       -- Essentially the name of a type without any of its type variables filled in.
-      -- E.g. 'Maybe', 'Either', 'IO', 'Map'.
+      -- E.g. 'Maybe', 'Either', 'IO', 'Data.Map.Map'.
       [FgType tycon]
       -- ^ All arguments to the type constructor (fully saturated application).
       -- The empty list if the type constructor does not take any arguments
-      --  (e.g. 'Int', 'Char', 'Text') and otherwise one type for all type variables
+      --  (e.g. 'Int', 'Char', 'Data.Text.Text') and otherwise one type for all type variables
       --  of the type constructor (since we're only looking at the types of functions
       --  exported from a module where a partially applied type constructor is invalid).
-  -- ^ A type that's neither a list nor a tuple
   | FgType_List (FgType tycon)
   -- ^ A list
   | FgType_Tuple Boxity (FgType tycon) (NE.NonEmpty (FgType tycon))
@@ -154,6 +179,8 @@ instance Traversable FgType where
     FgType_Unit ->
       pure FgType_Unit
 
+-- | A /boxed/ value is one that's represented by a pointer to the actual data representing the value.
+--   An /unboxed/ value is represented by the actual data (no pointer).
 data Boxity
   = Boxed
   | Unboxed
@@ -233,6 +260,70 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
 instance NFData Boxity
 instance (NFData tycon) => NFData (FgType tycon)
 
+-- | Render a 'FgType' to Haskell syntax.
+--
+-- Examples:
+--
+-- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "Value" []]
+-- "Either String Value"
+--
+-- >>> renderFgType id $ FgType_List $ FgType_Tuple Boxed (FgType_TyConApp "Key" []) (NE.singleton $ FgType_TyConApp "Value" [])
+-- "[(Key, Value)]"
+--
+-- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "IO" [FgType_Unit]]
+-- "Either String (IO ())"
+renderFgType
+  :: forall tycon.
+     (tycon -> T.Text)
+  -> FgType tycon
+  -> T.Text
+renderFgType renderTycon fgType' =
+  let
+    parens :: T.Text -> T.Text
+    parens txt = "(" <> txt <> ")"
+
+    tupleParens Boxed = parens
+    tupleParens Unboxed = \txt -> "(#" <> txt <> "#)"
+
+    go :: Bool -> FgType tycon -> T.Text
+    go parenthesize = \case
+      FgType_TyConApp tycon fgTypeList ->
+        (if not (null fgTypeList) && parenthesize then parens else id) $
+          T.unwords $ renderTycon tycon : map (go True) fgTypeList
+      FgType_List fgType ->
+        "[" <> go False fgType <> "]"
+      FgType_Tuple boxity fgType fgTypeList ->
+        tupleParens boxity $ T.intercalate ", " $ map (go False) (fgType : NE.toList fgTypeList)
+      FgType_Unit ->
+        "()"
+  in go False fgType'
+
+-- | Render only the 'fgTyConName' of the 'FgTyCon'.
+--
+-- Examples:
+--
+-- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
+-- >>> renderFgTypeFgTyConUnqualified $ FgType_TyConApp ioTycon [FgType_Unit]
+-- "IO ()"
+renderFgTypeFgTyConUnqualified
+  :: FgType (FgTyCon T.Text)
+  -> T.Text
+renderFgTypeFgTyConUnqualified =
+  renderFgType fgTyConName
+
+-- | Render using 'renderFgTyConQualified' for the 'FgTyCon'.
+--
+-- Examples:
+--
+-- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
+-- >>> renderFgTypeFgTyConQualified $ FgType_TyConApp ioTycon [FgType_Unit]
+-- "ghc-prim-0.10.0:GHC.Types.IO ()"
+renderFgTypeFgTyConQualified
+  :: FgType (FgTyCon T.Text)
+  -> T.Text
+renderFgTypeFgTyConQualified =
+  renderFgType renderFgTyConQualified
+
 -- | Parse a 'FgPackage' from a string of the form /package_name-package_version/.
 --
 -- Examples:
@@ -254,6 +345,7 @@ parsePackageWithVersion packageAndVersion = do
 
 -- | Parse a 'FgTyCon' from a 'GHC.Core.TyCon.TyCon' pretty-printed in fully-qualified form
 --  (e.g. "base-4.18.0.0:Data.Either.Either").
+--  The inverse of 'renderFgTyConQualified'.
 --
 -- NOTE: Does not handle the /built-in/ types: list, tuple (including unit).
 --
@@ -290,6 +382,7 @@ parsePprTyCon str = do
 --   Return pair of non-empty text strings before and after character (neither string includes the character).
 --
 -- Example:
+--
 -- >>> :set -XOverloadedStrings
 -- >>> splitByEndNonEmpty "oops" '.' "Data.ByteString.Lazy.Internal.ByteString"
 -- Right ("Data.ByteString.Lazy.Internal","ByteString")
