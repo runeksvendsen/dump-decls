@@ -55,10 +55,10 @@ instance Traversable FunctionType where
     FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
 
 data TypeInfo tycon = TypeInfo
-  { typeInfo_expanded :: FunctionType tycon
-    -- ^ Does not contain type synonyms
+  { typeInfo_expanded :: Maybe (FunctionType tycon)
+    -- ^ Does not contain type synonyms. 'Nothing' if there are no type synonyms in 'typeInfo_unexpanded'.
   , typeInfo_unexpanded :: FunctionType tycon
-    -- ^ Contains type synonyms
+    -- ^ Potentially contains type synonyms
   } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
 instance (A.ToJSON tycon) => A.ToJSON (TypeInfo tycon)
@@ -68,7 +68,7 @@ instance (NFData tycon) => NFData (TypeInfo tycon)
 instance Traversable TypeInfo where
   traverse f ti =
     TypeInfo
-      <$> traverse f (typeInfo_expanded ti)
+      <$> traverse (traverse f) (typeInfo_expanded ti)
       <*> traverse f (typeInfo_unexpanded ti)
 
 data ModuleDeclarations value = ModuleDeclarations
