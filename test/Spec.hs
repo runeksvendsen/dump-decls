@@ -45,7 +45,7 @@ specPutStrLn =
 
     tiPutStrLn =
       Json.TypeInfo
-        { Json.typeInfo_expanded = Json.FunctionType
+        { Json.typeInfo_expanded = Just $ Json.FunctionType
             { Json.functionType_arg = Types.FgType_List $ Types.FgType_TyConApp tyConChar [] -- [Char]
             , Json.functionType_ret = tyConAppIOUnit
             }
@@ -74,7 +74,7 @@ specUnsnoc =
 
     tiUnsnoc =
       Json.TypeInfo
-        { Json.typeInfo_expanded = funtionType
+        { Json.typeInfo_expanded = Nothing
         , Json.typeInfo_unexpanded = funtionType
         }
 
