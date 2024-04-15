@@ -2,10 +2,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveFunctor #-}
-
+{-# LANGUAGE StrictData #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE TupleSections #-}
 module Json
 ( FunctionType(..)
-, ModuleDeclarations(..), fmapModuleDeclarations
+, TypeInfo(..)
+, ModuleDeclarations(..), fmapModuleDeclarations, explodeModuleDeclarations
 , DeclarationMapJson(..), fmapDeclarationMapJson
   -- * Util
 , streamPrintJsonList
@@ -22,7 +25,7 @@ import qualified Data.Aeson as A
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Map as Map
-import Types (BuiltinType)
+import Types (FgType, FgTyCon, TyConParseError, FgPackage)
 
 streamPrintJsonList
   :: A.ToJSON a
@@ -39,31 +42,69 @@ streamPrintJsonList jsonList =
     )
 
 data FunctionType value = FunctionType
-  { functionType_arg :: BuiltinType value
-  , functionType_ret :: BuiltinType value
-  } deriving (Eq, Show, Ord, Functor, Generic)
+  { functionType_arg :: value
+  , functionType_ret :: value
+  } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
 instance A.ToJSON value => A.ToJSON (FunctionType value)
 instance A.FromJSON value => A.FromJSON (FunctionType value)
 instance NFData value => NFData (FunctionType value)
 
-newtype ModuleDeclarations value = ModuleDeclarations
-  { moduleDeclarations_map :: Map value (Map value (FunctionType value))
-    -- ^ Map from module name to a map of function names to 'FunctionType'
-  } deriving (Eq, Show, Ord, A.ToJSON, A.FromJSON, NFData)
+instance Traversable FunctionType where
+  traverse f ft =
+    FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
+
+data TypeInfo tycon = TypeInfo
+  { typeInfo_expanded :: Maybe (FunctionType tycon)
+    -- ^ Does not contain type synonyms. 'Nothing' if there are no type synonyms in 'typeInfo_unexpanded'.
+  , typeInfo_unexpanded :: FunctionType tycon
+    -- ^ Potentially contains type synonyms
+  } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
+
+instance (A.ToJSON tycon) => A.ToJSON (TypeInfo tycon)
+instance (A.FromJSON tycon) => A.FromJSON (TypeInfo tycon)
+instance (NFData tycon) => NFData (TypeInfo tycon)
+
+instance Traversable TypeInfo where
+  traverse f ti =
+    TypeInfo
+      <$> traverse (traverse f) (typeInfo_expanded ti)
+      <*> traverse f (typeInfo_unexpanded ti)
+
+data ModuleDeclarations value = ModuleDeclarations
+  { moduleDeclarations_map :: Map value (Map value (TypeInfo (FgType (FgTyCon value))))
+    -- ^ Map from module name to a map of unqualified function names to 'TypeInfo'
+  , moduleDeclarations_mapFail :: Map value (Map value TyConParseError)
+    -- ^ Declarations for which an error occurred converting a 'GHC.Core.TyCon.TyCon' into a 'FgTyCon'.
+    --   This is probably a bug in 'Types.parsePprTyCon'.
+  } deriving (Eq, Show, Ord, Generic)
+
+instance (A.ToJSON a, A.ToJSONKey a) => A.ToJSON (ModuleDeclarations a)
+instance (A.FromJSON a, A.FromJSONKey a, Ord a) => A.FromJSON (ModuleDeclarations a)
+instance (NFData a) => NFData (ModuleDeclarations a)
 
 fmapModuleDeclarations
   :: Ord b
   => (a -> b)
   -> ModuleDeclarations a
   -> ModuleDeclarations b
-fmapModuleDeclarations f (ModuleDeclarations map') = ModuleDeclarations $
-  Map.mapKeys f (fmap (Map.mapKeys f . fmap (fmap f)) map')
+fmapModuleDeclarations f (ModuleDeclarations map' mapFail) = ModuleDeclarations
+  (Map.mapKeys f (fmap (Map.mapKeys f . fmap (fmap (fmap (fmap f)))) map'))
+  (Map.mapKeys f (fmap (Map.mapKeys f) mapFail))
+
+explodeModuleDeclarations
+  :: ModuleDeclarations value
+  -> [(value, (value, TypeInfo (FgType (FgTyCon value))))]
+explodeModuleDeclarations =
+  concatMap (\(value, lst) -> map (value,) lst)
+    . Map.toList
+    . fmap Map.toList
+    . moduleDeclarations_map
 
 data DeclarationMapJson value = DeclarationMapJson
-  { declarationMapJson_package :: value
+  { declarationMapJson_package :: FgPackage value
   , declarationMapJson_moduleDeclarations :: ModuleDeclarations value
-  } deriving (Generic, Show)
+  } deriving (Eq, Generic, Show)
 
 instance NFData a => NFData (DeclarationMapJson a)
 
@@ -74,7 +115,7 @@ fmapDeclarationMapJson
   -> DeclarationMapJson b
 fmapDeclarationMapJson f dmj =
   DeclarationMapJson
-    { declarationMapJson_package = f $ declarationMapJson_package dmj
+    { declarationMapJson_package = f <$> declarationMapJson_package dmj
     , declarationMapJson_moduleDeclarations = fmapModuleDeclarations f $ declarationMapJson_moduleDeclarations dmj
 
     }

@@ -2,3 +2,4 @@ packages:
   dump-decls.cabal
 with-compiler: ghc-9.0.2
 constraints: aeson < 2.0
+test-show-details: direct
