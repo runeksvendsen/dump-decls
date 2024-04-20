@@ -18,7 +18,7 @@ module Types
   -- * 'FgTyCon'
 , FgTyCon(..), parsePprTyCon, renderFgTyConQualified, TyConParseError(..), renderTyConParseError
   -- * Rendering 'FgType (FgTyCon T.Text)'
-, renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified
+, renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified, renderFgTypeFgTyConQualifiedNoPackage
   -- * 'FgPackage'
 , FgPackage(..), parsePackageWithVersion, renderFgPackage
   -- * (For testing)
@@ -73,6 +73,23 @@ renderFgTyConQualified tc =
     [ renderFgPackage $ fgTyConPackage tc
     , ":"
     , fgTyConModule tc
+    , "."
+    , fgTyConName tc
+    ]
+
+-- | Render in the format /module_name.name/.
+--
+-- Example:
+--
+-- >>> :set -XOverloadedStrings
+-- >>> renderFgTyConQualified (FgTyCon "Text" "Data.Text.Internal" (FgPackage "text" "2.0.2"))
+-- "Data.Text.Internal.Text"
+renderFgTyConQualifiedNoPackage
+  :: FgTyCon T.Text
+  -> T.Text
+renderFgTyConQualifiedNoPackage tc =
+  T.concat
+    [ fgTyConModule tc
     , "."
     , fgTyConName tc
     ]
@@ -323,6 +340,19 @@ renderFgTypeFgTyConQualified
   -> T.Text
 renderFgTypeFgTyConQualified =
   renderFgType renderFgTyConQualified
+
+-- | Render using 'renderFgTyConQualifiedNoPackage' for the 'FgTyCon'.
+--
+-- Examples:
+--
+-- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
+-- >>> renderFgTypeFgTyConQualifiedNoPackage $ FgType_TyConApp ioTycon [FgType_Unit]
+-- "GHC.Types.IO ()"
+renderFgTypeFgTyConQualifiedNoPackage
+  :: FgType (FgTyCon T.Text)
+  -> T.Text
+renderFgTypeFgTyConQualifiedNoPackage =
+  renderFgType renderFgTyConQualifiedNoPackage
 
 -- | Parse a 'FgPackage' from a string of the form /package_name-package_version/.
 --
