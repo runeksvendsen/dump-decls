@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Main (main) where
 
 import qualified Exe
@@ -96,7 +97,7 @@ mkSpec pkgName modName defnName expected declarationMapJson =
         mTypeInfo = mDefnMap >>= Map.lookup defnName
         typeInfo = fromJust mTypeInfo
     mTypeInfo `shouldNotBe` Nothing
-    typeInfo `shouldBe` expected
+    IgnorePackageVersion typeInfo `shouldBe` IgnorePackageVersion expected
 
 parsePprTyCon :: T.Text -> Types.FgTyCon T.Text
 parsePprTyCon = either error id . Types.parsePprTyCon
@@ -109,3 +110,20 @@ lookupOn f  (x:xs)
 
 tyConChar :: Types.FgTyCon T.Text
 tyConChar = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.Char"
+
+newtype IgnorePackageVersion a = IgnorePackageVersion a
+  deriving (Show)
+
+instance Eq (IgnorePackageVersion (Json.TypeInfo (Types.FgType (Types.FgTyCon T.Text)))) where
+  IgnorePackageVersion ti1 == IgnorePackageVersion ti2 =
+    let strikePkgVersionFgPackage pkg = pkg { Types.fgPackageVersion = "" }
+
+        strikePkgVersionFgTyCon tc = tc {
+            Types.fgTyConPackage = strikePkgVersionFgPackage (Types.fgTyConPackage tc)
+          }
+
+        strikePkgVersionFgType fgt = fmap strikePkgVersionFgTyCon fgt
+
+        strikePkgVersionTypeInfo ti = fmap strikePkgVersionFgType ti
+
+    in strikePkgVersionTypeInfo ti1 == strikePkgVersionTypeInfo ti2
