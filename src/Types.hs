@@ -82,7 +82,7 @@ renderFgTyConQualified tc =
 -- Example:
 --
 -- >>> :set -XOverloadedStrings
--- >>> renderFgTyConQualified (FgTyCon "Text" "Data.Text.Internal" (FgPackage "text" "2.0.2"))
+-- >>> renderFgTyConQualifiedNoPackage (FgTyCon "Text" "Data.Text.Internal" (FgPackage "text" "2.0.2"))
 -- "Data.Text.Internal.Text"
 renderFgTyConQualifiedNoPackage
   :: FgTyCon T.Text
