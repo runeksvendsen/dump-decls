@@ -16,7 +16,7 @@ module Types
 , Boxity(..)
 , isBoxed
   -- * 'FgTyCon'
-, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, TyConParseError(..), renderTyConParseError, tgTyConHackageSrcUrl
+, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, renderFgTyConQualifiedNoPackage, TyConParseError(..), renderTyConParseError, tgTyConHackageSrcUrl
   -- * Rendering 'FgType (FgTyCon T.Text)'
 , renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified, renderFgTypeFgTyConQualifiedNoPackage, fgTypeHackageSrcUrlsHtml
   -- * 'FgPackage'
