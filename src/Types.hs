@@ -16,9 +16,9 @@ module Types
 , Boxity(..)
 , isBoxed
   -- * 'FgTyCon'
-, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, TyConParseError(..), renderTyConParseError
+, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, TyConParseError(..), renderTyConParseError, tgTyConHackageSrcUrl
   -- * Rendering 'FgType (FgTyCon T.Text)'
-, renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified, renderFgTypeFgTyConQualifiedNoPackage
+, renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified, renderFgTypeFgTyConQualifiedNoPackage, fgTypeHackageSrcUrlsHtml
   -- * 'FgPackage'
 , FgPackage(..), parsePackageWithVersion, renderFgPackage
   -- * (For testing)
@@ -91,6 +91,37 @@ renderFgTyConQualifiedNoPackage tc =
   T.concat
     [ fgTyConModule tc
     , "."
+    , fgTyConName tc
+    ]
+
+-- | Render as Hackage source URL.
+--
+-- Examples:
+--
+-- >>> :set -XOverloadedStrings
+-- >>> let Right tyCon = parsePprTyCon "base-4.18.0.0:GHC.Maybe.Maybe"
+-- >>> tgTyConHackageSrcUrl tyCon
+-- "https://hackage.haskell.org/package/base-4.18.0.0/docs/src/GHC.Maybe.html#Maybe"
+--
+-- >>> :set -XOverloadedStrings
+-- >>> let Right tyCon = parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
+-- >>> tgTyConHackageSrcUrl tyCon
+-- "https://hackage.haskell.org/package/text-2.0.2/docs/src/Data.Text.Internal.html#Text"
+--
+-- >>> :set -XOverloadedStrings
+-- >>> let Right tyCon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.Char"
+-- >>> tgTyConHackageSrcUrl tyCon
+-- "https://hackage.haskell.org/package/ghc-prim-0.10.0/docs/src/GHC.Types.html#Char"
+tgTyConHackageSrcUrl
+  :: FgTyCon T.Text
+  -> T.Text
+tgTyConHackageSrcUrl tc =
+  T.concat
+    [ "https://hackage.haskell.org/package/"
+    , renderFgPackage $ fgTyConPackage tc
+    , "/docs/src/"
+    , fgTyConModule tc
+    , ".html#"
     , fgTyConName tc
     ]
 
@@ -353,6 +384,27 @@ renderFgTypeFgTyConQualifiedNoPackage
   -> T.Text
 renderFgTypeFgTyConQualifiedNoPackage =
   renderFgType renderFgTyConQualifiedNoPackage
+
+-- | Render each type constructor wrapped in a HTML @a@ tag with a @href@ attribute (@<a href="example_hackage_source_url">ExampleTypeConstructor</a>@).
+--
+-- Example:
+--
+-- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
+-- >>> let Right textTycon = parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
+-- >>> fgTypeHackageSrcUrls renderFgTyConQualifiedNoPackage $ FgType_TyConApp ioTycon [FgType_TyConApp textTycon []]
+-- "<a href=\"https://hackage.haskell.org/package/ghc-prim-0.10.0/docs/src/GHC.Types.html#IO\">GHC.Types.IO</a> <a href=\"https://hackage.haskell.org/package/text-2.0.2/docs/src/Data.Text.Internal.html#Text\">Data.Text.Internal.Text</a>"
+fgTypeHackageSrcUrlsHtml
+  :: (FgTyCon T.Text -> T.Text)
+  -> FgType (FgTyCon T.Text)
+  -> T.Text
+fgTypeHackageSrcUrlsHtml renderTycon =
+  renderFgType $ \tyCon -> T.concat
+      [ "<a href=\""
+      , tgTyConHackageSrcUrl tyCon
+      , "\">"
+      , renderTycon tyCon
+      , "</a>"
+      ]
 
 -- | Parse a 'FgPackage' from a string of the form /package_name-package_version/.
 --
