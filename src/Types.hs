@@ -385,25 +385,27 @@ renderFgTypeFgTyConQualifiedNoPackage
 renderFgTypeFgTyConQualifiedNoPackage =
   renderFgType renderFgTyConQualifiedNoPackage
 
--- | Render each type constructor wrapped in a HTML @a@ tag with a @href@ attribute (@<a href="example_hackage_source_url">ExampleTypeConstructor</a>@).
+-- | Render each type constructor wrapped in a HTML tag with an @href@ attribute
+-- set to 'tgTyConHackageSrcUrl' (e.g. @<a href="example_hackage_source_url">ExampleTypeConstructor</a>@).
 --
 -- Example:
 --
 -- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
 -- >>> let Right textTycon = parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
--- >>> fgTypeHackageSrcUrls renderFgTyConQualifiedNoPackage $ FgType_TyConApp ioTycon [FgType_TyConApp textTycon []]
+-- >>> fgTypeHackageSrcUrlsHtml "a" renderFgTyConQualifiedNoPackage $ FgType_TyConApp ioTycon [FgType_TyConApp textTycon []]
 -- "<a href=\"https://hackage.haskell.org/package/ghc-prim-0.10.0/docs/src/GHC.Types.html#IO\">GHC.Types.IO</a> <a href=\"https://hackage.haskell.org/package/text-2.0.2/docs/src/Data.Text.Internal.html#Text\">Data.Text.Internal.Text</a>"
 fgTypeHackageSrcUrlsHtml
-  :: (FgTyCon T.Text -> T.Text)
+  :: T.Text -- ^ HTML tag to which an @href@ attribute set to the URL will be added (e.g. @"a"@)
+  -> (FgTyCon T.Text -> T.Text) -- ^ How to render the 'FgTyCon'
   -> FgType (FgTyCon T.Text)
   -> T.Text
-fgTypeHackageSrcUrlsHtml renderTycon =
+fgTypeHackageSrcUrlsHtml urlTag renderTycon =
   renderFgType $ \tyCon -> T.concat
-      [ "<a href=\""
+      [ "<" <> urlTag <> " href=\""
       , tgTyConHackageSrcUrl tyCon
       , "\">"
       , renderTycon tyCon
-      , "</a>"
+      , "</" <> urlTag <> ">"
       ]
 
 -- | Parse a 'FgPackage' from a string of the form /package_name-package_version/.
