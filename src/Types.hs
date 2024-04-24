@@ -347,8 +347,8 @@ renderFgType = renderFgTypeGeneric id
 renderFgTypeGeneric
   :: forall tycon str.
      (Monoid str)
-  => (T.Text -> str)
-  -> (tycon -> str)
+  => (T.Text -> str) -- ^ Construct a literal text string
+  -> (tycon -> str) -- ^ Render a @tycon@
   -> FgType tycon
   -> str
 renderFgTypeGeneric mkLiteral renderTycon fgType' =
