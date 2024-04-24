@@ -37,7 +37,6 @@ import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
 import qualified Codec.Binary.UTF8.String as UTF8
 import qualified Data.ByteString.Lazy as BSL
-import Data.String (IsString)
 import qualified Data.List
 
 -- | A fully qualified type constructor used by /Haskell Function Graph/.
@@ -327,7 +326,7 @@ renderFgType
      (tycon -> T.Text)
   -> FgType tycon
   -> T.Text
-renderFgType = renderFgTypeGeneric
+renderFgType = renderFgTypeGeneric id
 
 -- | Same as 'renderFgType' but not specialized to 'T.Text'.
 --
@@ -336,42 +335,41 @@ renderFgType = renderFgTypeGeneric
 --  (2) a text literal (e.g. space and parens):
 --
 -- >>> :set -XGeneralizedNewtypeDeriving
--- >>> import Data.String (IsString(fromString))
 -- >>> type Literal = T.Text
 -- >>> type RenderedTyCon = T.Text
 -- >>> newtype TyConOrText = TyConOrText [Either Literal RenderedTyCon] deriving (Show, Monoid, Semigroup)
--- >>> instance IsString TyConOrText where fromString str = TyConOrText [Left . T.pack $ str]
 -- >>> let either' = FgTyCon "Either" "" (FgPackage "" "")
 -- >>> let text' = FgTyCon "Text" "" (FgPackage "" "")
 -- >>> let io' = FgTyCon "IO" "" (FgPackage "" "")
 -- >>> let eitherStringValue = FgType_TyConApp either' [FgType_TyConApp text' [], FgType_TyConApp io' [FgType_Unit]]
--- >>> renderFgTypeGeneric (\tyCon -> TyConOrText [Right $ fgTyConName tyCon]) eitherStringValue
+-- >>> renderFgTypeGeneric (\str -> TyConOrText [Left str]) (\tyCon -> TyConOrText [Right $ fgTyConName tyCon]) eitherStringValue
 -- TyConOrText [Right "Either",Left " ",Right "Text",Left " ",Left "(",Right "IO",Left " ",Left "()",Left ")"]
 renderFgTypeGeneric
   :: forall tycon str.
-     (Monoid str, IsString str)
-  => (tycon -> str)
+     (Monoid str)
+  => (T.Text -> str)
+  -> (tycon -> str)
   -> FgType tycon
   -> str
-renderFgTypeGeneric renderTycon fgType' =
+renderFgTypeGeneric mkLiteral renderTycon fgType' =
   let
     parens :: str -> str
-    parens txt = "(" <> txt <> ")"
+    parens txt = mkLiteral "(" <> txt <> mkLiteral ")"
 
     tupleParens Boxed = parens
-    tupleParens Unboxed = \txt -> "(#" <> txt <> "#)"
+    tupleParens Unboxed = \txt -> mkLiteral "(#" <> txt <> mkLiteral "#)"
 
     go :: Bool -> FgType tycon -> str
     go parenthesize = \case
       FgType_TyConApp tycon fgTypeList ->
         (if not (null fgTypeList) && parenthesize then parens else id) $
-          mconcat $ Data.List.intersperse " " $ renderTycon tycon : map (go True) fgTypeList
+          mconcat $ Data.List.intersperse (mkLiteral " ") $ renderTycon tycon : map (go True) fgTypeList
       FgType_List fgType ->
-        "[" <> go False fgType <> "]"
+        mkLiteral "[" <> go False fgType <> mkLiteral "]"
       FgType_Tuple boxity fgType fgTypeList ->
-        tupleParens boxity $ mconcat $ Data.List.intersperse ", " $ map (go False) (fgType : NE.toList fgTypeList)
+        tupleParens boxity $ mconcat $ Data.List.intersperse (mkLiteral ", ") $ map (go False) (fgType : NE.toList fgTypeList)
       FgType_Unit ->
-        "()"
+        mkLiteral "()"
   in go False fgType'
 
 -- | Render only the 'fgTyConName' of the 'FgTyCon'.
