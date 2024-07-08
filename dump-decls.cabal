@@ -8,7 +8,7 @@ maintainer:         ben@smart-cactus.org
 copyright:          (c) 2023 Ben Gamari
 
 library
-    exposed-modules:  Json, Types, Compat.Aeson
+    exposed-modules:  Json, Types, Compat, Compat.Aeson, Compat.Text
     build-depends:    base
                     , containers
                     , aeson

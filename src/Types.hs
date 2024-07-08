@@ -32,7 +32,7 @@ import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
 import qualified Data.Text as T
 import Control.Applicative (empty, (<|>))
-import qualified Compat.Aeson
+import qualified Compat
 import qualified Data.Aeson.Types as A
 import Control.Monad ((>=>))
 import qualified Codec.Binary.UTF8.String as UTF8
@@ -257,7 +257,7 @@ instance A.FromJSON Boxity where
 instance (A.ToJSON tycon) => A.ToJSON (FgType tycon) where
   toJSON = \case
     FgType_TyConApp tycon tyList -> A.object
-      [("type", A.object [("tycon" :: Compat.Aeson.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
+      [("type", A.object [("tycon" :: Compat.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
     FgType_List bty -> A.object
       [("list", A.toJSON bty)]
     FgType_Tuple boxity bty neBty ->
@@ -294,11 +294,11 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
       parseKind
         :: A.FromJSON a
         => A.Object
-        -> Compat.Aeson.Key
+        -> Compat.Key
         -> (a -> A.Parser (FgType tycon))
         -> A.Parser (FgType tycon)
       parseKind o keyTxt mkType =
-        maybe empty (A.parseJSON >=> mkType) (Compat.Aeson.lookup keyTxt o)
+        maybe empty (A.parseJSON >=> mkType) (Compat.lookup keyTxt o)
 
       tupleFromList boxity = \case
         ty1:ty2:tyTail ->
@@ -502,7 +502,7 @@ splitByEndNonEmpty
   -> T.Text -- String to split
   -> Either String (T.Text, T.Text)
 splitByEndNonEmpty err char str' =
-  case Compat.Aeson.spanEnd (/= char) str' of
+  case Compat.spanEnd (/= char) str' of
     (a', b)
       | Just (a, _) <- T.unsnoc a' -- remove trailing "char"
       , not (T.null b) && not (T.null a) ->
