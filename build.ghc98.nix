@@ -1,1 +1,4 @@
-(import ./nix/pkgs.nix).pkgs98.haskell.packages.ghc98.callCabal2nix "dump-decls" ./. { }
+import ./default.nix
+  { nixpkgs = (import ./nix/pkgs.nix).pkgs98;
+    compiler = "ghc98";
+  }
