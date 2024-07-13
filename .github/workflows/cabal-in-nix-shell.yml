@@ -46,7 +46,7 @@ jobs:
         run: nix-shell ${{ matrix.nixShell }} --run 'cabal update'
 
       - name: Build 'dump-decls' library
-        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE build lib:dump-decls'
+        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE build lib:lib'
 
       - name: Run unit test
         run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE test test:unit'
