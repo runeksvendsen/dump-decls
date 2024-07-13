@@ -95,4 +95,4 @@ jobs:
         run: nix-shell --run 'cabal run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)'
 
       - name: Run test suite
-        run: nix-shell --run 'cabal test test:exe-integration-test' # don't run the doctest. it fails when run in shell (but work fine when run as part of nix-build).
+        run: nix-shell --run 'cabal run exe:exe-integration-test' # don't run the doctest. it fails when run in shell (but work fine when run as part of nix-build).
