@@ -40,7 +40,6 @@ executable dump-decls
 --   1. A GHC-interfacing one (components "lib:dump-decls-exe", "exe:dump-decls"); and
 --   2. A GHC-agnostic part ("lib" library plus tests)
 executable exe-integration-test
-  type: exitcode-stdio-1.0
   main-is: Spec.hs
   hs-source-dirs:
       test
