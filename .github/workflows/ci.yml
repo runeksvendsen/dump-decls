@@ -22,4 +22,4 @@ jobs:
       - run: nix-build ${{ matrix.package }}/${{ matrix.nix_file }}
       - name: Test run of 'dump-decls' executable
         if: ${{ matrix.package == 'dump-decls-exe' }}
-        run: nix-shell --run '$(nix-build ${{ matrix.nix_file }})/bin/dump-decls $(ghc-pkg list --simple-output --names-only)'
+        run: nix-shell --run '$(nix-build ${{ matrix.package }}/${{ matrix.nix_file }})/bin/dump-decls $(ghc-pkg list --simple-output --names-only)'
