@@ -7,6 +7,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns #-}
 -- |
 -- TODO: Test 'Data.Aeson.encode
 -- TODO: Merge "Types" and "JSON"?
@@ -272,7 +273,7 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
     A.Object o -> parseObject o
     val -> failParse val
     where
-      parseObject o = do
+      parseObject !o = do
             parseKind o "type" (\o' ->  FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args")
         <|> parseKind o "list" (pure . FgType_List)
         <|> parseKind o "tuple" (tupleFromList Boxed)
