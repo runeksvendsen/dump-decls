@@ -275,10 +275,14 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
     val -> failParse val
     where
       parseObject !o = do
-            parseKind o "type" (\o' ->  FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args")
-        <|> parseKind o "list" (pure . FgType_List)
-        <|> parseKind o "tuple" (tupleFromList Boxed)
-        <|> parseKind o "tuple#" (tupleFromList Unboxed)
+            parseKind o "type" (\o' -> do
+              !tycon <- o' A..: "tycon"
+              !tyconArgs <- o' A..: "tycon_args"
+              pure $! FgType_TyConApp tycon tyconArgs
+              )
+        <|> parseKind o "list" (\(!a) -> pure $! FgType_List a)
+        <|> parseKind o "tuple" (\(!a) -> tupleFromList Boxed a)
+        <|> parseKind o "tuple#" (\(!a) -> tupleFromList Unboxed a)
         <|> failParse (A.Object o)
 
       failParse val = fail $ unwords
