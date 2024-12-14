@@ -8,7 +8,7 @@ jobs:
   build_library:
     strategy:
       matrix:
-        os: [ubuntu-22.04, ubuntu-20.04, macos-13, macos-12, macos-11]
+        os: [ubuntu-22.04, ubuntu-20.04, macos-14, macos-13, macos-12]
         nixShell: [shell.nix, shell-902.nix]
     runs-on: ${{ matrix.os }}
     steps:
@@ -45,8 +45,8 @@ jobs:
       - name: Run 'cabal update'
         run: nix-shell ${{ matrix.nixShell }} --run 'cabal update'
 
-      - name: Build 'dump-decls' library
-        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE build lib:dump-decls'
+      - name: Build 'dump-decls-lib' library
+        run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE build lib:dump-decls-lib'
 
       - name: Run unit test
         run: nix-shell ${{ matrix.nixShell }} --run 'cabal --project-file=$CABAL_PROJECT_FILE test test:unit'
@@ -55,7 +55,7 @@ jobs:
     needs: build_library
     strategy:
       matrix:
-        os: [ubuntu-22.04, ubuntu-20.04, macos-13, macos-12, macos-11]
+        os: [ubuntu-22.04, ubuntu-20.04, macos-14, macos-13, macos-12]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -88,11 +88,11 @@ jobs:
       - name: Run 'cabal update'
         run: nix-shell --run 'cabal update'
 
-      - name: Build 'dump-decls' executable
-        run: nix-shell --run 'cabal build exe:dump-decls'
+      - name: Build 'dump-decls-exe' executable
+        run: nix-shell --run 'cabal build dump-decls-exe:exe:dump-decls'
 
       - name: Test run of 'dump-decls' executable
-        run: nix-shell --run 'cabal run exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)'
+        run: nix-shell --run 'cabal run dump-decls-exe:exe:dump-decls -- $(ghc-pkg list --simple-output --names-only)'
 
       - name: Run test suite
-        run: nix-shell --run 'cabal run exe:exe-integration-test' # don't run the doctest. it fails when run in shell (but work fine when run as part of nix-build).
+        run: nix-shell --run 'cabal run dump-decls-exe:test:exe-integration-test' # don't run the doctest. it fails when run in shell (but work fine when run as part of nix-build).
