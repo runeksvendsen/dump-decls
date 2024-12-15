@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -46,8 +45,6 @@ data FunctionType value = FunctionType
   , functionType_ret :: value
   } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
-instance A.ToJSON value => A.ToJSON (FunctionType value)
-instance A.FromJSON value => A.FromJSON (FunctionType value)
 instance NFData value => NFData (FunctionType value)
 
 instance Traversable FunctionType where
@@ -61,8 +58,6 @@ data TypeInfo tycon = TypeInfo
     -- ^ Potentially contains type synonyms
   } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
-instance (A.ToJSON tycon) => A.ToJSON (TypeInfo tycon)
-instance (A.FromJSON tycon) => A.FromJSON (TypeInfo tycon)
 instance (NFData tycon) => NFData (TypeInfo tycon)
 
 instance Traversable TypeInfo where
@@ -79,8 +74,6 @@ data ModuleDeclarations value = ModuleDeclarations
     --   This is probably a bug in 'Types.parsePprTyCon'.
   } deriving (Eq, Show, Ord, Generic)
 
-instance (A.ToJSON a, A.ToJSONKey a) => A.ToJSON (ModuleDeclarations a)
-instance (A.FromJSON a, A.FromJSONKey a, Ord a) => A.FromJSON (ModuleDeclarations a)
 instance (NFData a) => NFData (ModuleDeclarations a)
 
 fmapModuleDeclarations
@@ -117,8 +110,5 @@ fmapDeclarationMapJson f dmj =
   DeclarationMapJson
     { declarationMapJson_package = f <$> declarationMapJson_package dmj
     , declarationMapJson_moduleDeclarations = fmapModuleDeclarations f $ declarationMapJson_moduleDeclarations dmj
-
     }
 
-instance (A.ToJSONKey value, A.ToJSON value) => A.ToJSON (DeclarationMapJson value)
-instance (Ord value, A.FromJSONKey value, A.FromJSON value) => A.FromJSON (DeclarationMapJson value)
