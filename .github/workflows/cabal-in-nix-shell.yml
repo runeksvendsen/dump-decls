@@ -9,7 +9,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-20.04, macos-14, macos-13, macos-12]
-        nixShell: [shell.nix, shell-902.nix]
+        nixShell: [shell.nix, shell-902.nix, shell-982.nix]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
