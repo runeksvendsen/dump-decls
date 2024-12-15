@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE StrictData #-}
@@ -8,7 +7,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE BangPatterns #-}
 -- |
 -- TODO: Test 'Data.Aeson.encode
 -- TODO: Merge "Types" and "JSON"?
@@ -30,8 +28,6 @@ where
 
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Aeson as A
-import qualified Data.Aeson.TH as A
-import qualified Data.Vector as V
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
 import qualified Data.Text as T
@@ -58,19 +54,8 @@ data FgTyCon text = FgTyCon
     -- ^ Package
   } deriving (Eq, Show, Ord, Generic, Functor)
 
-instance (A.ToJSON value) => A.ToJSON (FgTyCon value) where
-  toJSON (FgTyCon a b c) = A.toJSON (a, b, c)
-  toEncoding (FgTyCon a b c) = A.toEncoding (a, b, c)
-instance (A.FromJSON value) => A.FromJSON (FgTyCon value) where
-  parseJSON = A.withArray "FgTyCon" $ \vec -> do
-    !mVal0 <- V.indexM vec 0
-    !mVal1 <- V.indexM vec 1
-    !mVal2 <- V.indexM vec 2
-    !val0 <- A.parseJSON mVal0
-    !val1 <- A.parseJSON mVal1
-    !val2 <- A.parseJSON mVal2
-    pure $! FgTyCon val0 val1 val2
-
+instance (A.ToJSON a) => A.ToJSON (FgTyCon a)
+instance (A.FromJSON a) => A.FromJSON (FgTyCon a)
 instance (NFData a) => NFData (FgTyCon a)
 
 -- | Render in the format /package_name-package_version:module_name.name/.
@@ -149,17 +134,8 @@ data FgPackage text = FgPackage
     -- ^ Package version, e.g. @2.0.2@
   } deriving (Eq, Show, Ord, Generic, Functor)
 
-instance (A.ToJSON value) => A.ToJSON (FgPackage value) where
-  toJSON (FgPackage a b) = A.toJSON (a, b)
-  toEncoding (FgPackage a b) = A.toEncoding (a, b)
-instance (A.FromJSON value) => A.FromJSON (FgPackage value) where
-  parseJSON = A.withArray "FgPackage" $ \vec -> do
-    !mVal0 <- V.indexM vec 0
-    !mVal1 <- V.indexM vec 1
-    !val0 <- A.parseJSON mVal0
-    !val1 <- A.parseJSON mVal1
-    pure $! FgPackage val0 val1
-
+instance (A.ToJSON a) => A.ToJSON (FgPackage a)
+instance (A.FromJSON a) => A.FromJSON (FgPackage a)
 instance (NFData a) => NFData (FgPackage a)
 
 -- | Inverse of 'parsePackageWithVersion'
@@ -185,7 +161,8 @@ data TyConParseError = TyConParseError
     -- ^ The source location of the 'GHC.Core.TyCon.TyCon'
   } deriving (Eq, Show, Ord, Generic)
 
-A.deriveJSON A.defaultOptions ''TyConParseError
+instance A.ToJSON TyConParseError
+instance A.FromJSON TyConParseError
 instance NFData TyConParseError
 
 -- | Render a 'TyConParseError' as a human-readable text string

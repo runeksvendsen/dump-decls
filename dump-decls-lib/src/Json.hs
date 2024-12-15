@@ -5,7 +5,6 @@
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE BangPatterns #-}
 module Json
 ( FunctionType(..)
 , TypeInfo(..)
@@ -23,7 +22,6 @@ import Data.Map.Strict (Map)
 import Data.List (intersperse)
 import Control.DeepSeq (NFData)
 import qualified Data.Aeson as A
-import qualified Data.Vector as V
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Map as Map
@@ -48,17 +46,8 @@ data FunctionType value = FunctionType
   , functionType_ret :: value
   } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
-instance A.ToJSON value => A.ToJSON (FunctionType value) where
-  toJSON (FunctionType a b) = A.toJSON (a, b)
-  toEncoding (FunctionType a b) = A.toEncoding (a, b)
-instance A.FromJSON value => A.FromJSON (FunctionType value) where
-  parseJSON = A.withArray "FunctionType" $ \vec -> do
-    !mVal0 <- V.indexM vec 0
-    !mVal1 <- V.indexM vec 1
-    !val0 <- A.parseJSON mVal0
-    !val1 <- A.parseJSON mVal1
-    pure $! FunctionType val0 val1
-
+instance A.ToJSON value => A.ToJSON (FunctionType value)
+instance A.FromJSON value => A.FromJSON (FunctionType value)
 instance NFData value => NFData (FunctionType value)
 
 instance Traversable FunctionType where
@@ -72,16 +61,8 @@ data TypeInfo tycon = TypeInfo
     -- ^ Potentially contains type synonyms
   } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
 
-instance A.ToJSON value => A.ToJSON (TypeInfo value) where
-  toJSON (TypeInfo a b) = A.toJSON (a, b)
-  toEncoding (TypeInfo a b) = A.toEncoding (a, b)
-instance A.FromJSON value => A.FromJSON (TypeInfo value) where
-  parseJSON = A.withArray "TypeInfo" $ \vec -> do
-    !mVal0 <- V.indexM vec 0
-    !mVal1 <- V.indexM vec 1
-    !val0 <- A.parseJSON mVal0
-    !val1 <- A.parseJSON mVal1
-    pure $! TypeInfo val0 val1
+instance (A.ToJSON tycon) => A.ToJSON (TypeInfo tycon)
+instance (A.FromJSON tycon) => A.FromJSON (TypeInfo tycon)
 instance (NFData tycon) => NFData (TypeInfo tycon)
 
 instance Traversable TypeInfo where
@@ -98,17 +79,8 @@ data ModuleDeclarations value = ModuleDeclarations
     --   This is probably a bug in 'Types.parsePprTyCon'.
   } deriving (Eq, Show, Ord, Generic)
 
-instance (A.ToJSON value, A.ToJSONKey value) => A.ToJSON (ModuleDeclarations value) where
-  toJSON (ModuleDeclarations a b) = A.toJSON (a, b)
-  toEncoding (ModuleDeclarations a b) = A.toEncoding (a, b)
-instance (A.FromJSON value, A.FromJSONKey value, Ord value) => A.FromJSON (ModuleDeclarations value) where
-  parseJSON = A.withArray "ModuleDeclarations" $ \vec -> do
-    !mVal0 <- V.indexM vec 0
-    !mVal1 <- V.indexM vec 1
-    !val0 <- A.parseJSON mVal0
-    !val1 <- A.parseJSON mVal1
-    pure $! ModuleDeclarations val0 val1
-
+instance (A.ToJSON a, A.ToJSONKey a) => A.ToJSON (ModuleDeclarations a)
+instance (A.FromJSON a, A.FromJSONKey a, Ord a) => A.FromJSON (ModuleDeclarations a)
 instance (NFData a) => NFData (ModuleDeclarations a)
 
 fmapModuleDeclarations
@@ -145,15 +117,8 @@ fmapDeclarationMapJson f dmj =
   DeclarationMapJson
     { declarationMapJson_package = f <$> declarationMapJson_package dmj
     , declarationMapJson_moduleDeclarations = fmapModuleDeclarations f $ declarationMapJson_moduleDeclarations dmj
+
     }
 
-instance (A.ToJSONKey value, A.ToJSON value) => A.ToJSON (DeclarationMapJson value) where
-  toJSON (DeclarationMapJson a b) = A.toJSON (a, b)
-  toEncoding (DeclarationMapJson a b) = A.toEncoding (a, b)
-instance (Ord value, A.FromJSONKey value, A.FromJSON value) => A.FromJSON (DeclarationMapJson value) where
-  parseJSON = A.withArray "DeclarationMapJson" $ \vec -> do
-    !mVal0 <- V.indexM vec 0
-    !mVal1 <- V.indexM vec 1
-    !val0 <- A.parseJSON mVal0
-    !val1 <- A.parseJSON mVal1
-    pure $! DeclarationMapJson val0 val1
+instance (A.ToJSONKey value, A.ToJSON value) => A.ToJSON (DeclarationMapJson value)
+instance (Ord value, A.FromJSONKey value, A.FromJSON value) => A.FromJSON (DeclarationMapJson value)
