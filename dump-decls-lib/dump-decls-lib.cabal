@@ -43,3 +43,20 @@ test-suite unit
     , dump-decls-lib
     , hspec
   default-language: Haskell2010
+
+-- TODO: get Nix to include benchmark in bin/ folder
+executable benchmark-lib
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: bench/
+  build-depends:
+      base
+    , dump-decls-lib
+    , aeson
+    , text
+    , bytestring
+    , criterion
+    , file-embed
+  default-language: Haskell2010
+  ghc-options: -threaded
+               -O2
