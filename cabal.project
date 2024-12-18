@@ -1,5 +1,6 @@
 packages:
   dump-decls-lib/*.cabal
   dump-decls-exe/*.cabal
+optimization: 2
 constraints: aeson >= 2.0
 test-show-details: direct
