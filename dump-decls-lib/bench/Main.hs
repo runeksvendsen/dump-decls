@@ -1,10 +1,12 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DataKinds #-}
 module Main
 (main)
 where
 
+import Json.Version3
+import Json.Version4
 import Criterion.Main
 import Data.Functor (void, (<&>))
 import Control.Monad ((<=<))
@@ -18,16 +20,19 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.Maybe (fromMaybe)
 import qualified Data.FileEmbed
 
-dataFileName :: FilePath
-dataFileName =
-  "/Users/rune/code/haskell-function-graph/data/all3.json"
+-- TODO: include in this package
 
-blah :: FilePath
-blah = $(Data.FileEmbed.makeRelativeToProject "css/chota.css")
+dataFileNameV3 :: FilePath
+dataFileNameV3 =
+  "/Users/rune/code/haskell-function-graph/data/all-v3.json"
+
+dataFileNameV4 :: FilePath
+dataFileNameV4 =
+  "/Users/rune/code/haskell-function-graph/data/all-v4.json"
 
 fileReadDeclarationMapReadFile
-  :: FilePath
-  -> IO [Json.DeclarationMapJson T.Text]
+  :: A.FromJSON (Versioned version [DeclarationMapJson T.Text]) => FilePath
+  -> IO (Versioned version [Json.DeclarationMapJson T.Text])
 fileReadDeclarationMapReadFile fileName =
   BSL.readFile fileName >>=
     either
@@ -36,8 +41,9 @@ fileReadDeclarationMapReadFile fileName =
     . A.eitherDecode
 
 fileReadDeclarationMapDecodeFileStrict
-  :: FilePath
-  -> IO [Json.DeclarationMapJson T.Text]
+  :: A.FromJSON (Versioned version [DeclarationMapJson T.Text])
+  => FilePath
+  -> IO (Versioned version [Json.DeclarationMapJson T.Text])
 fileReadDeclarationMapDecodeFileStrict fileName =
   A.eitherDecodeFileStrict fileName >>=
     either
@@ -48,9 +54,13 @@ main :: IO ()
 main = do
   defaultMain
     [ bgroup "Decode DeclarationMapJson"
-      [ bench "eitherDecode <$> BSL.readFile" $ nfIO (fileReadDeclarationMapReadFile dataFileName)
-      , bench "decodeFileStrict" $ nfIO (fileReadDeclarationMapDecodeFileStrict dataFileName)
+      [ bgroup "eitherDecode . readFile"
+          [ bench "v3" $ nfIO (fileReadDeclarationMapReadFile dataFileNameV3 :: IO (Versioned 3 [Json.DeclarationMapJson T.Text]))
+          , bench "v4" $ nfIO (fileReadDeclarationMapReadFile dataFileNameV4 :: IO (Versioned 4 [Json.DeclarationMapJson T.Text]))
+          ]
+      , bgroup "decodeFileStrict"
+          [ bench "v3" $ nfIO (fileReadDeclarationMapDecodeFileStrict dataFileNameV3 :: IO (Versioned 3 [Json.DeclarationMapJson T.Text]))
+          , bench "v4" $ nfIO (fileReadDeclarationMapDecodeFileStrict dataFileNameV4 :: IO (Versioned 4 [Json.DeclarationMapJson T.Text]))
+          ]
       ]
     ]
-  where
-

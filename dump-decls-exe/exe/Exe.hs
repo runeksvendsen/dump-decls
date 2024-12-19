@@ -9,6 +9,8 @@ module Exe
 )
 where
 
+import Json.Version3
+import Json.Version4
 import Types
 import qualified Json
 import GHC hiding (moduleName)
