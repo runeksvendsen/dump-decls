@@ -7,6 +7,10 @@ author:             Ben Gamari
 maintainer:         ben@smart-cactus.org
 copyright:          (c) 2023 Ben Gamari
 
+extra-source-files:
+    bench/data/all-v3.json
+    bench/data/all-v4.json
+
 library
     exposed-modules:  Json
                     , Json.Migrate

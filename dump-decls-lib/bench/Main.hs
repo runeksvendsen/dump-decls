@@ -24,11 +24,11 @@ import qualified Data.FileEmbed
 
 dataFileNameV3 :: FilePath
 dataFileNameV3 =
-  "/Users/rune/code/haskell-function-graph/data/all-v3.json"
+  "dump-decls-lib/bench/data/all-v3.json"
 
 dataFileNameV4 :: FilePath
 dataFileNameV4 =
-  "/Users/rune/code/haskell-function-graph/data/all-v4.json"
+  "dump-decls-lib/bench/data/all-v4.json"
 
 fileReadDeclarationMapReadFile
   :: A.FromJSON (Versioned version [DeclarationMapJson T.Text]) => FilePath
