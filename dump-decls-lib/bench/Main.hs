@@ -5,8 +5,10 @@ module Main
 (main)
 where
 
-import Json.Version3
-import Json.Version4
+import Versioned
+import Json.Version3 ()
+import Json.Version4 ()
+import Json.Version5 ()
 import Criterion.Main
 import Data.Functor (void, (<&>))
 import Control.Monad ((<=<))
@@ -30,8 +32,12 @@ dataFileNameV4 :: FilePath
 dataFileNameV4 =
   "dump-decls-lib/bench/data/all-v4.json"
 
+dataFileNameV5 :: FilePath
+dataFileNameV5 =
+  "dump-decls-lib/bench/data/all-v5.json"
+
 fileReadDeclarationMapReadFile
-  :: A.FromJSON (Versioned version [DeclarationMapJson T.Text]) => FilePath
+  :: A.FromJSON (Versioned version [Json.DeclarationMapJson T.Text]) => FilePath
   -> IO (Versioned version [Json.DeclarationMapJson T.Text])
 fileReadDeclarationMapReadFile fileName =
   BSL.readFile fileName >>=
@@ -41,7 +47,7 @@ fileReadDeclarationMapReadFile fileName =
     . A.eitherDecode
 
 fileReadDeclarationMapDecodeFileStrict
-  :: A.FromJSON (Versioned version [DeclarationMapJson T.Text])
+  :: A.FromJSON (Versioned version [Json.DeclarationMapJson T.Text])
   => FilePath
   -> IO (Versioned version [Json.DeclarationMapJson T.Text])
 fileReadDeclarationMapDecodeFileStrict fileName =
@@ -57,10 +63,12 @@ main = do
       [ bgroup "eitherDecode . readFile"
           [ bench "v3" $ nfIO (fileReadDeclarationMapReadFile dataFileNameV3 :: IO (Versioned 3 [Json.DeclarationMapJson T.Text]))
           , bench "v4" $ nfIO (fileReadDeclarationMapReadFile dataFileNameV4 :: IO (Versioned 4 [Json.DeclarationMapJson T.Text]))
+          , bench "v5" $ nfIO (fileReadDeclarationMapReadFile dataFileNameV5 :: IO (Versioned 5 [Json.DeclarationMapJson T.Text]))
           ]
       , bgroup "decodeFileStrict"
           [ bench "v3" $ nfIO (fileReadDeclarationMapDecodeFileStrict dataFileNameV3 :: IO (Versioned 3 [Json.DeclarationMapJson T.Text]))
           , bench "v4" $ nfIO (fileReadDeclarationMapDecodeFileStrict dataFileNameV4 :: IO (Versioned 4 [Json.DeclarationMapJson T.Text]))
+          , bench "v5" $ nfIO (fileReadDeclarationMapDecodeFileStrict dataFileNameV5 :: IO (Versioned 5 [Json.DeclarationMapJson T.Text]))
           ]
       ]
     ]
