@@ -60,7 +60,6 @@ test-suite unit
 
 -- TODO: get Nix to include benchmark in bin/ folder
 executable benchmark-lib
-  type: exitcode-stdio-1.0
   main-is: Main.hs
   hs-source-dirs: bench/
   build-depends:
