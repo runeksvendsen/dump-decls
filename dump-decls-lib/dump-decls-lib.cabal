@@ -16,6 +16,7 @@ library
                     , Json.Migrate
                     , Json.Version3
                     , Json.Version4
+                    , Json.Version5
                     , Types
                     , Compat
                     , Compat.Aeson
