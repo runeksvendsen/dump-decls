@@ -134,7 +134,25 @@ getDefinitions pprFun pkg_nm = do
   liftIO $ IO.hPutStrLn IO.stderr $ "getDefinitions " ++ pkg_nm
   pure $ DeclarationMap unit_id <$> mDefinitions
 
-reportUnitDecls :: (SDoc -> T.Text) -> UnitInfo -> Ghc (Maybe (Map ModuleName (Map Name (Json.FunctionType Type))))
+prettyPrintFT :: Json.FunctionType (FgType (FgTyCon T.Text)) -> T.Text
+prettyPrintFT ft = T.unwords
+  [ renderFgType renderFgTyConQualified (Json.functionType_arg ft)
+  , "->"
+  , renderFgType renderFgTyConQualified (Json.functionType_ret ft)
+  ]
+
+prettyPrintFTF :: FunctionTypeForall T.Text T.Text -> T.Text
+prettyPrintFTF = todo
+
+type FunctionMap =
+  Map
+    Name
+    (Either
+      (Json.FunctionType (FgType (FgTyCon T.Text)))
+      (FunctionTypeForall T.Text T.Text)
+    )
+
+reportUnitDecls :: (SDoc -> T.Text) -> UnitInfo -> Ghc (Maybe (Map ModuleName FunctionMap))
 reportUnitDecls pprFun unit_info = do
     let exposed :: [ModuleName]
         exposed = map fst (unitExposedModules unit_info)
@@ -147,7 +165,11 @@ reportUnitDecls pprFun unit_info = do
       then Nothing
       else Just map'
 
-reportModuleDecls :: (SDoc -> T.Text) -> UnitId -> ModuleName -> Ghc (Map Name (Json.FunctionType Type))
+reportModuleDecls
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> ModuleName
+  -> Ghc FunctionMap
 reportModuleDecls pprFun unit_id modl_nm = do
     modl <- GHC.lookupQualifiedModule (OtherPkg unit_id) modl_nm
     mb_mod_info <- GHC.getModuleInfo modl
@@ -166,12 +188,11 @@ reportModuleDecls pprFun unit_id modl_nm = do
 
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, Json.FunctionType (scaledThing arg) res)
+            [ (varName _id, blah)
+            -- Json.FunctionType (scaledThing arg) res
             | Just thing <- things
             , AnId _id <- [thing]
-            , (arg, res) <- case splitFunTys $ varType _id of -- is it a function with exactly one argument?
-                ([arg], res) -> [(arg, res)]
-                (_, _) -> []
+            , Just blah <- [parseType pprFun unit_id (modl_nm, varName _id) (varType _id)]
             , case tyThingParent_maybe thing of
                 Just parent
                   | is_exported (getOccName parent) -> False
@@ -186,42 +207,67 @@ parseType
   -> UnitId
   -> (ModuleName, Name)
   -> Type
-  -> Maybe
+  -> Maybe -- a 'Just' if this type is supported
       (Either
         (Json.FunctionType (FgType (FgTyCon T.Text))) -- only concrete types
         (FunctionTypeForall T.Text T.Text) -- both concrete types and type variables
       )
 parseType pprFun package dbg@(modName, functionName) ty =
-  go Nothing ty
+  case splitFunTys ty of
+    ([], res) ->
+      case res of
+        ForAllTy bndr ty' ->
+          Right <$> goForall (parseForall Nothing bndr) ty'
+        _ -> Nothing
+    ([arg], res) ->
+      Left <$> goSimple ty
   where
-    go mForall ty =
+    goForall forall_ ty =
       case splitFunTys ty of
         ([], res) ->
           case res of
-            ForAllTy (Bndr tyCoVar forAllTyFlag) ty' -> do
-              let mkForall = maybe (Right . Forall.singleton) (\forall' -> (`Forall.appendTyVar` forall')) mForall
-                  tyVarName = pprFun (ppr tyCoVar) -- WIP: correct?
-                  eForall = mkForall tyVarName
-                  forall' = either (error . show) id eForall -- WIP: don't throw exception
-              -- recursive case
-              go (Just forall') ty'
+            ForAllTy bndr ty' -> do
+              let forall' = parseForall (Just forall_) bndr
+              goForall (parseForall (Just forall') bndr) ty'
             _ -> Nothing
         ([arg], res) -> do
-            arg' <- toFgType' pprFun mForall $ scaledThing arg
-            res' <- toFgType' pprFun mForall res
+            arg' <- toFgType' pprFun $ scaledThing arg
+            res' <- toFgType' pprFun res
             let eResult = do
-                  arg'' <- traverse (tyConOrTyVarTODO pprFun package dbg mForall) arg'
-                  res'' <- traverse (tyConOrTyVarTODO pprFun package dbg mForall) res'
-                  pure $ Json.FunctionType arg'' res''
-            pure $ Left $
+                  arg'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) arg'
+                  res'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) res'
+                  pure $ FunctionTypeForall
+                    forall_
+                    (eitherToTyConWithVar <$> arg'')
+                    (eitherToTyConWithVar <$> res'')
+            pure $
               either
               (error . show) -- WIP: don't throw exception
               id
               eResult
-
-            -- TODO: handle case with type variables.
-            --       constructor: TyVarTy{}
         (_, _) -> Nothing
+
+    goSimple ty =
+      case splitFunTys ty of
+        ([arg], res) -> do
+          arg' <- toFgType $ scaledThing arg
+          res' <- toFgType res
+          let eResult = do
+                arg'' <- traverse (tyConToFgTyCon pprFun package dbg) arg'
+                res'' <- traverse (tyConToFgTyCon pprFun package dbg) res'
+                pure $ Json.FunctionType arg'' res''
+          pure $
+            either
+            (error . show) -- WIP: don't throw exception
+            id
+            eResult
+        _ -> Nothing
+
+    parseForall mForall (Bndr tyCoVar forAllTyFlag) =
+      let mkForall = maybe (Right . Forall.singleton) (\forall' -> (`Forall.appendTyVar` forall')) mForall
+          tyVarName = pprFun (ppr tyCoVar) -- WIP: correct?
+          eForall = mkForall tyVarName
+      in either (error . show) id eForall -- WIP: don't throw exception
 
 showType :: Type -> String
 showType = \case
@@ -297,32 +343,30 @@ declarationMapToJson pprFun dm =
 data TodoError
   = TodoError_Forall (Forall.ForallError T.Text)
   | TodoError_TyCon TyConParseError
+      deriving (Eq, Show)
 
 tyConOrTyVarTODO
   :: (SDoc -> T.Text)
   -> UnitId
   -> (ModuleName, Name) -- for debugging purposes
-  -> Maybe (Forall.Forall T.Text)
+  -> Forall.Forall T.Text
   -> Either TyCon TyVar
   -> Either TodoError (Either (FgTyCon T.Text) (Forall.TyVar T.Text))
-tyConOrTyVarTODO pprFun package dbg mForall =
+tyConOrTyVarTODO pprFun package dbg forall_ =
   either
     (fmap Left . first TodoError_TyCon . tyConToFgTyCon pprFun package dbg)
-    (fmap Right . first TodoError_Forall . tyVarToTODO pprFun package dbg mForall)
+    (fmap Right . first TodoError_Forall . tyVarToTODO pprFun package dbg forall_)
 
 tyVarToTODO
   :: (SDoc -> T.Text)
   -> UnitId
   -> (ModuleName, Name) -- for debugging purposes
-  -> Maybe (Forall.Forall T.Text)
+  -> Forall.Forall T.Text
   -> TyVar
   -> Either (Forall.ForallError T.Text) (Forall.TyVar T.Text)
-tyVarToTODO pprFun package dbg mForall tyVar =
+tyVarToTODO pprFun package dbg forall_ tyVar =
   let getTyVarName = pprFun . ppr -- WIP: correct?
-  in maybe
-      (error "type variable without preceding forall") -- WIP: don't throw exception. Include in 'ForallError'?
-      (Forall.lookupTyVar (getTyVarName tyVar))
-      mForall
+  in Forall.lookupTyVar (getTyVarName tyVar) forall_
 
 tyConToFgTyCon
   :: (SDoc -> T.Text)
@@ -410,10 +454,9 @@ toFgType = \case
 
 toFgType'
   :: (SDoc -> T.Text)
-  -> Maybe (Forall.Forall T.Text)
   -> Type
   -> Maybe (FgType (Either TyCon TyVar))
-toFgType' pprFun mForall =
+toFgType' pprFun =
   go
   where
     go = \case
