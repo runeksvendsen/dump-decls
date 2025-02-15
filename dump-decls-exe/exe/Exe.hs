@@ -11,6 +11,7 @@ where
 
 import Types
 import qualified Json
+import Types.Doodle -- TODO
 import GHC hiding (moduleName)
 import qualified GHC.Paths
 import GHC.Core.Type (splitFunTys, expandTypeSynonyms)
@@ -24,7 +25,7 @@ import GHC.Utils.Outputable hiding (sep, (<>))
 import GHC.Types.TyThing (tyThingParent_maybe)
 import GHC.Types.Name (nameOccName, getSrcLoc)
 import GHC.Types.Name.Occurrence (OccName)
-import GHC.Types.Var (varName, varType)
+import GHC.Types.Var (varName, varType, VarBndr (Bndr))
 import Data.Function (on)
 import Data.List (sortBy)
 import System.Environment (getArgs)
@@ -41,24 +42,28 @@ import qualified Control.Exception as Ex
 import GHC.Core.Multiplicity (scaledThing)
 import qualified Control.Monad.Catch
 import qualified Control.Exception
-import GHC.Core.TyCo.Rep (Type(..))
+import GHC.Core.TyCo.Rep (Type(..), KindOrType)
 import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon, isTupleTyCon)
 import GHC.Builtin.Names (listTyConKey, getUnique)
 import qualified Data.Text as T
 import Data.Bifunctor (bimap, first)
 import GHC.Stack (HasCallStack)
 import Data.Functor.Identity (Identity(Identity))
+import Debug.Trace (trace)
+import qualified Types.Forall as Forall
+import Data.Either (fromLeft, fromRight)
 
 main :: IO ()
 main = do
   pkg_names <- getArgs
-  let runGhc' :: Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
-      runGhc' action = reallyCatch $ runGhc (Just GHC.Paths.libdir) action
-  pprFun <- case pkg_names of
+  let runGhc' :: FilePath -> Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
+      runGhc' libdir action = reallyCatch $ runGhc (Just libdir) action
+  (pprFun, ghcLibDir) <- case pkg_names of
     [] -> Exit.die "Missing argument(s): one or more packages"
-    first_package_name : _ -> runGhc' (getPprFun first_package_name) >>= either (fail . show) pure
+    ghcLibDir : (first_package_name : _) ->
+      runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\lol -> pure $ (lol, ghcLibDir))
   lst <- forM pkg_names $ \pkg_nm -> do
-    unsafeInterleaveIO $ runGhc' (getDefinitions pprFun pkg_nm) >>= logErrors
+    unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions pprFun pkg_nm) >>= logErrors
   let declarationMapJsonList = map (declarationMapToJson pprFun) (catMaybes lst)
   forM_ declarationMapJsonList $ \declarationMapJson -> do
     let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
@@ -174,6 +179,61 @@ reportModuleDecls pprFun unit_id modl_nm = do
             ]
     pure $ Map.fromList contents
 
+type Lol = Type
+
+parseType
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> (ModuleName, Name)
+  -> Type
+  -> Maybe
+      (Either
+        (Json.FunctionType (FgType (FgTyCon T.Text))) -- only concrete types
+        (FunctionTypeForall T.Text T.Text) -- both concrete types and type variables
+      )
+parseType pprFun package dbg@(modName, functionName) ty =
+  go Nothing ty
+  where
+    go mForall ty =
+      case splitFunTys ty of
+        ([], res) ->
+          case res of
+            ForAllTy (Bndr tyCoVar forAllTyFlag) ty' -> do
+              let mkForall = maybe (Right . Forall.singleton) (\forall' -> (`Forall.appendTyVar` forall')) mForall
+                  tyVarName = pprFun (ppr tyCoVar) -- WIP: correct?
+                  eForall = mkForall tyVarName
+                  forall' = either (error . show) id eForall -- WIP: don't throw exception
+              -- recursive case
+              go (Just forall') ty'
+            _ -> Nothing
+        ([arg], res) -> do
+            arg' <- toFgType' pprFun mForall $ scaledThing arg
+            res' <- toFgType' pprFun mForall res
+            let eResult = do
+                  arg'' <- traverse (tyConOrTyVarTODO pprFun package dbg mForall) arg'
+                  res'' <- traverse (tyConOrTyVarTODO pprFun package dbg mForall) res'
+                  pure $ Json.FunctionType arg'' res''
+            pure $ Left $
+              either
+              (error . show) -- WIP: don't throw exception
+              id
+              eResult
+
+            -- TODO: handle case with type variables.
+            --       constructor: TyVarTy{}
+        (_, _) -> Nothing
+
+showType :: Type -> String
+showType = \case
+  TyVarTy{} -> "TyVarTy"
+  AppTy {} -> "AppTy"
+  TyConApp {} -> "TyConApp"
+  ForAllTy {} -> "ForAllTy"
+  FunTy  {} -> "FunTy"
+  LitTy {} -> "LitTy"
+  CastTy{} -> "CastTy"
+  CoercionTy{} -> "CoercionTy"
+
 data DeclarationMap = DeclarationMap
   { declarationMap_package :: UnitId
   , declarationMap_moduleDeclarations :: Map ModuleName (Map Name (Json.FunctionType Type))
@@ -228,30 +288,62 @@ declarationMapToJson pprFun dm =
             { Json.typeInfo_expanded = if funTyExpanded == funTy then Nothing else Just funTyExpanded
             , Json.typeInfo_unexpanded = funTy
             }
-      pure $ traverse (traverse (tyConToFgTyCon dbg)) funTypeInfo
+      pure $ traverse (traverse (tyConToFgTyCon pprFun package dbg)) funTypeInfo
 
     fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . fullyQualify
     noQualify' = pprFun . noQualify
 
-    tyConToFgTyCon
-      :: (ModuleName, Name) -- for debugging purposes
-      -> TyCon
-      -> Either TyConParseError (FgTyCon T.Text)
-    tyConToFgTyCon (modName, functionName) tyCon =
-      first mkTyConParseError . parsePprTyCon $ tyConPpr
-      where
-        tyConPpr = fullyQualify' tyCon
+data TodoError
+  = TodoError_Forall (Forall.ForallError T.Text)
+  | TodoError_TyCon TyConParseError
 
-        fullyQualify' = pprFun . fullyQualify
+tyConOrTyVarTODO
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> (ModuleName, Name) -- for debugging purposes
+  -> Maybe (Forall.Forall T.Text)
+  -> Either TyCon TyVar
+  -> Either TodoError (Either (FgTyCon T.Text) (Forall.TyVar T.Text))
+tyConOrTyVarTODO pprFun package dbg mForall =
+  either
+    (fmap Left . first TodoError_TyCon . tyConToFgTyCon pprFun package dbg)
+    (fmap Right . first TodoError_Forall . tyVarToTODO pprFun package dbg mForall)
 
-        mkTyConParseError e = TyConParseError
-          { tyConParseErrorMsg = e
-          , tyConParseErrorInput = tyConPpr
-          , tyConParseErrorFunctionName = pprFun (ppr functionName)
-          , tyConParseErrorPackage = parsePackageFromUnitId pprFun package
-          , tyConParseErrorSrcLoc = pprFun (ppr $ getSrcLoc tyCon)
-          }
+tyVarToTODO
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> (ModuleName, Name) -- for debugging purposes
+  -> Maybe (Forall.Forall T.Text)
+  -> TyVar
+  -> Either (Forall.ForallError T.Text) (Forall.TyVar T.Text)
+tyVarToTODO pprFun package dbg mForall tyVar =
+  let getTyVarName = pprFun . ppr -- WIP: correct?
+  in maybe
+      (error "type variable without preceding forall") -- WIP: don't throw exception. Include in 'ForallError'?
+      (Forall.lookupTyVar (getTyVarName tyVar))
+      mForall
+
+tyConToFgTyCon
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> (ModuleName, Name) -- for debugging purposes
+  -> TyCon
+  -> Either TyConParseError (FgTyCon T.Text)
+tyConToFgTyCon pprFun package (modName, functionName) tyCon =
+  first mkTyConParseError . parsePprTyCon $ tyConPpr
+  where
+    tyConPpr = fullyQualify' tyCon
+
+    fullyQualify' = pprFun . fullyQualify
+
+    mkTyConParseError e = TyConParseError
+      { tyConParseErrorMsg = e
+      , tyConParseErrorInput = tyConPpr
+      , tyConParseErrorFunctionName = pprFun (ppr functionName)
+      , tyConParseErrorPackage = parsePackageFromUnitId pprFun package
+      , tyConParseErrorSrcLoc = pprFun (ppr $ getSrcLoc tyCon)
+      }
 
 fullyQualify :: Outputable a => a -> SDoc
 fullyQualify =
@@ -278,27 +370,60 @@ noQualify =
         , queryPromotionTick = const True
         }
 
--- | Convert a 'Type' to a 'FgType'. Only 'TyConApp' is supported currently.
-toFgType :: Type -> Maybe (FgType TyCon)
-toFgType !ty = case ty of
-  TyConApp tyCon [] | isTupleTyCon tyCon -> do -- unit
+-- | Convert a 'TyConApp' to a 'FgType TyCon'
+tyConAppToFgTypeTyCon
+  :: (KindOrType -> Maybe (FgType (Either TyCon a)))
+     -- ^ Recursive case
+     --
+     -- TODO: why 'Maybe' and 'Either'?
+  -> TyCon
+     -- ^ First argument to 'TyConApp'
+  -> [KindOrType]
+     -- ^ Second argument to 'TyConApp'
+  -> Maybe (FgType (Either TyCon a))
+tyConAppToFgTypeTyCon recurse tyCon = \case
+  [] | isTupleTyCon tyCon -> do -- unit
       pure FgType_Unit
-  TyConApp tyCon (ty1:ty2:tyTail) | Just boxity <- tupleBoxity tyCon -> do -- tuple (of size >= 2)
-      ty1' <- toFgType ty1
-      tyTail' <- mapM toFgType (ty2 NE.:| tyTail)
+  (ty1:ty2:tyTail) | Just boxity <- tupleBoxity tyCon -> do -- tuple (of size >= 2)
+      ty1' <- recurse ty1
+      tyTail' <- mapM recurse (ty2 NE.:| tyTail)
       pure $ FgType_Tuple boxity ty1' tyTail'
-  TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> do -- list
-    ty1' <- toFgType ty1
+  [ty1] | getUnique tyCon == listTyConKey -> do -- list
+    ty1' <- recurse ty1
     pure $ FgType_List ty1'
-  TyConApp tyCon tyList -> do -- neither a tuple nor a list
-    tyList' <- mapM toFgType tyList
-    pure $ FgType_TyConApp tyCon tyList'
-  _ -> Nothing
+  tyList -> do -- neither a tuple nor a list
+    tyList' <- mapM recurse tyList
+    pure $ FgType_TyConApp (Left tyCon) tyList'
   where
     tupleBoxity tyCon
       | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
       | isBoxedTupleTyCon tyCon = Just Types.Boxed
       | otherwise = Nothing
+
+-- | Convert a 'Type' to a 'FgType'. Only 'TyConApp' is supported currently.
+toFgType :: Type -> Maybe (FgType TyCon)
+toFgType = \case
+  TyConApp tyCon tyConList ->
+    fmap (fromLeft (error "toFgType: impossible")) <$>
+      tyConAppToFgTypeTyCon (fmap (fmap Left) . toFgType) tyCon tyConList
+  _ -> Nothing
+
+toFgType'
+  :: (SDoc -> T.Text)
+  -> Maybe (Forall.Forall T.Text)
+  -> Type
+  -> Maybe (FgType (Either TyCon TyVar))
+toFgType' pprFun mForall =
+  go
+  where
+    go = \case
+      TyConApp tyCon tyConList ->
+        tyConAppToFgTypeTyCon go tyCon tyConList
+      TyVarTy tyVar ->
+        pure $ FgType_TyConApp (Right tyVar) []
+      AppTy fun arg ->
+        todo
+      _ -> Nothing
 
 parsePackageFromUnitId
   :: (SDoc -> T.Text)
@@ -308,3 +433,7 @@ parsePackageFromUnitId pprFun unitId =
   either (error . ("BUG: parsePackageFromUnitId: " <>)) id (parsePackageWithVersion $ fullyQualify' unitId)
   where
     fullyQualify' = pprFun . fullyQualify
+
+{-# WARNING todo "Unfinished TODO" #-}
+todo :: a
+todo = error "TODO"

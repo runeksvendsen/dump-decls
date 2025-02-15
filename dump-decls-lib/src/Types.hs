@@ -453,6 +453,7 @@ parsePackageWithVersion packageAndVersion = do
     splitByEndNonEmpty "invalid package identifier" '-' packageAndVersion
   pure $ FgPackage packageName packageVersion
 
+-- TODO: 
 -- | Parse a 'FgTyCon' from a 'GHC.Core.TyCon.TyCon' pretty-printed in fully-qualified form
 --  (e.g. "base-4.18.0.0:Data.Either.Either").
 --  The inverse of 'renderFgTyConQualified'.
