@@ -4,6 +4,7 @@
 {-# HLINT ignore "Move guards forward" #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Exe
 ( main
 )
@@ -27,7 +28,7 @@ import GHC.Types.Name (nameOccName, getSrcLoc)
 import GHC.Types.Name.Occurrence (OccName)
 import GHC.Types.Var (varName, varType, VarBndr (Bndr))
 import Data.Function (on)
-import Data.List (sortBy)
+import Data.List (sortBy, foldl')
 import System.Environment (getArgs)
 import Control.Monad (forM, forM_, unless)
 import Data.Map.Strict (Map)
@@ -52,6 +53,8 @@ import Data.Functor.Identity (Identity(Identity))
 import Debug.Trace (trace)
 import qualified Types.Forall as Forall
 import Data.Either (fromLeft, fromRight)
+import Data.Functor ((<&>), void)
+import qualified Data.Text.IO as TIO
 
 main :: IO ()
 main = do
@@ -131,8 +134,30 @@ getDefinitions pprFun pkg_nm = do
     Just unit_info -> return unit_info
     Nothing -> fail "unknown package"
   mDefinitions <- reportUnitDecls pprFun unit_info
+  forM_ mDefinitions $ \defs -> do
+    let blah = concat $ map (ppFunctionMap pprFun) (Map.elems defs)
+    void $ liftIO $ mapM (TIO.hPutStrLn IO.stderr) blah
   liftIO $ IO.hPutStrLn IO.stderr $ "getDefinitions " ++ pkg_nm
-  pure $ DeclarationMap unit_id <$> mDefinitions
+  pure $ DeclarationMap unit_id <$> Nothing
+
+ppFunctionMap
+  :: (SDoc -> T.Text)
+  -> FunctionMap
+  -> [T.Text]
+ppFunctionMap pprFun fm =
+  Map.toList fm <&> \(name, fun) -> T.unwords
+    [ pprFun (ppr name)
+    , "::"
+    , prettyPrintFunction fun
+    ]
+
+prettyPrintFunction
+  :: Either
+      (Json.FunctionType (FgType (FgTyCon T.Text)))
+      (FunctionTypeForall T.Text T.Text)
+  -> T.Text
+prettyPrintFunction =
+  either prettyPrintFT prettyPrintFTF
 
 prettyPrintFT :: Json.FunctionType (FgType (FgTyCon T.Text)) -> T.Text
 prettyPrintFT ft = T.unwords
@@ -142,7 +167,16 @@ prettyPrintFT ft = T.unwords
   ]
 
 prettyPrintFTF :: FunctionTypeForall T.Text T.Text -> T.Text
-prettyPrintFTF = todo
+prettyPrintFTF ftf = T.unwords
+  [ Forall.renderForall id $ ftf_forall ftf
+  , renderFgType' $ ftf_arg ftf
+  , "->"
+  , renderFgType' $ ftf_ret ftf
+  ]
+  where
+    renderFgType' :: FgType (Either (FgTyCon T.Text) (Forall.TyVar T.Text)) -> T.Text
+    renderFgType' =
+      renderFgType (either renderFgTyConQualifiedNoPackage Forall.getTyVar)
 
 type FunctionMap =
   Map
@@ -212,15 +246,16 @@ parseType
         (Json.FunctionType (FgType (FgTyCon T.Text))) -- only concrete types
         (FunctionTypeForall T.Text T.Text) -- both concrete types and type variables
       )
-parseType pprFun package dbg@(modName, functionName) ty =
-  case splitFunTys ty of
+parseType pprFun package dbg tyInit =
+  case splitFunTys tyInit of
     ([], res) ->
       case res of
         ForAllTy bndr ty' ->
           Right <$> goForall (parseForall Nothing bndr) ty'
         _ -> Nothing
-    ([arg], res) ->
-      Left <$> goSimple ty
+    ([_], _) ->
+      Left <$> goSimple tyInit
+    _ -> Nothing
   where
     goForall forall_ ty =
       case splitFunTys ty of
@@ -236,10 +271,7 @@ parseType pprFun package dbg@(modName, functionName) ty =
             let eResult = do
                   arg'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) arg'
                   res'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) res'
-                  pure $ FunctionTypeForall
-                    forall_
-                    (eitherToTyConWithVar <$> arg'')
-                    (eitherToTyConWithVar <$> res'')
+                  pure $ FunctionTypeForall forall_ arg'' res''
             pure $
               either
               (error . show) -- WIP: don't throw exception
@@ -455,18 +487,61 @@ toFgType = \case
 toFgType'
   :: (SDoc -> T.Text)
   -> Type
-  -> Maybe (FgType (Either TyCon TyVar))
-toFgType' pprFun =
-  go
+  -> Maybe (FgType (Either TyCon (TyVarApp TyCon TyVar)))
+toFgType' pprFun ty =
+  go ty
   where
     go = \case
       TyConApp tyCon tyConList ->
         tyConAppToFgTypeTyCon go tyCon tyConList
       TyVarTy tyVar ->
-        pure $ FgType_TyConApp (Right tyVar) []
-      AppTy fun arg ->
-        todo
+        pure $ FgType_TyConApp (Right $ TyVar tyVar) []
+      appTy@(AppTy fun arg) -> do
+        fun' <- go fun
+        arg' <- go arg
+        case fun' of
+          FgType_TyConApp (Right tyVar) _ -> do
+            pure $ FgType_TyConApp (Right $ TyVarApp tyVar arg') []
+          _ ->
+            -- 'TyConApp' is not allowed as first argument to 'AppTy'.
+            -- TODO: why is 'FgType_TyConApp (Right tyVar)' not a TyConApp and everything else is?
+            -- See docs: https://hackage.haskell.org/package/ghc-9.6.1/docs/GHC-Core-TyCo-Rep.html#v:AppTy
+            error $ unwords
+              [ "Unexpected TyConApp as first argument to AppTy:"
+              , (T.unpack . pprFun . ppr $ appTy) <> "."
+              , "Outer type:"
+              , T.unpack . pprFun . ppr $ ty
+              ]
       _ -> Nothing
+
+data TyVarApp tyCon tyVar
+  = TyVar tyVar
+  | TyVarApp (TyVarApp tyCon tyVar) (FgType (Either tyCon (TyVarApp tyCon tyVar)))
+
+-- 1. TyCon TyCon        : TyConApp TyCon [TyConApp TyCon []]
+-- 2. TyCon TyVar        : TyConApp TyCon [TyConApp TyVar []]
+-- 3. TyVar TyCon        : TyConApp TyVar [TyConApp TyCon []]
+-- 4. TyVar TyVar        : TyConApp TyVar [TyConApp TyVar []]
+-- 4. (TyVar TyVar) TyVar:
+blah :: forall tycon. tycon -> FgType (FgType tycon)
+blah tyVar =
+  let test :: FgType tycon
+      test = FgType_TyConApp tyVar []
+  in FgType_TyConApp
+    (FgType_TyConApp tyVar [test])
+    []
+
+-- Rewrite: 'App (App (Var a) (Var b)) (Var c)` to 'TyConApp (Var a) [(Var b) (Var c)]
+--    ->
+f :: (f a b) c -> b
+f = undefined
+
+f'' :: f (a b) -> b
+f'' = undefined
+
+
+f' :: (Either a) b -> b
+f' = undefined
 
 parsePackageFromUnitId
   :: (SDoc -> T.Text)

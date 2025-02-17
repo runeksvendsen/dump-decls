@@ -11,6 +11,7 @@ library
     exposed-modules: Exe
     hs-source-dirs: exe
     build-depends:    base, dump-decls-lib, ghc, containers, text, bytestring, exceptions, ghc-paths
+    ghc-options:      -Wall
 
 executable dump-decls
     main-is:          Main.hs
