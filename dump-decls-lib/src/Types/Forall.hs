@@ -12,11 +12,14 @@ module Types.Forall
 where
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
-import Data.Foldable (toList)
 import Data.String (fromString)
 
 -- TODO
 type OrdSet a = [a]
+
+-- insertion order
+toOrderedList :: OrdSet a -> [a]
+toOrderedList = reverse -- TODO use Data.Foldable.toList for the real OSet
 
 -- | Represents the @forall@-part of a type signature, which has the form
 --   @forall x1 x2 x3 [...] xn.@.
@@ -30,7 +33,7 @@ renderForall
   -> Forall tyVar
   -> T.Text
 renderForall renderTyVar (Forall ordSet) =
-    T.unwords (fromString "forall" : map renderTyVar (toList ordSet)) <> fromString "."
+    T.unwords (fromString "forall" : map renderTyVar (toOrderedList ordSet)) <> fromString "."
 
 -- | Represents a type variable in a type signature, e.g. the
 --   last two occurrences of @a@ in @forall a. a -> a@.
