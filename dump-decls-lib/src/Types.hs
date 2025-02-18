@@ -478,8 +478,12 @@ parsePackageWithVersion packageAndVersion = do
 parsePprTyCon :: T.Text -> Either String (FgTyCon T.Text)
 parsePprTyCon str = do
   (packageAndVersion, fqn) <- case T.splitOn ":" str of
-    [packageAndVersion, fqn] -> pure (packageAndVersion, fqn)
-    _ -> Left $ "missing colon in " <> show (T.unpack str)
+    packageAndVersion : fqnLst@(_ : _) ->
+      -- NOTE: if the type constructor name contains one or more colons, then we need to restore these after splitting on the colon that follows the package name/version
+      let fqn = mconcat $ Data.List.intersperse ":" fqnLst
+      in pure (packageAndVersion, fqn)
+    _ ->
+      Left $ "missing colon in " <> show (T.unpack str)
   package <- parsePackageWithVersion packageAndVersion
   (moduleName, name) <-
     splitByEndNonEmpty "invalid fully qualified identifier" '.' fqn
