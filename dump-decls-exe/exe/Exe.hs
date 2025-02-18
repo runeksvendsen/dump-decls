@@ -144,12 +144,16 @@ ppFunctionMap
   :: (SDoc -> T.Text)
   -> FunctionMap
   -> [T.Text]
-ppFunctionMap pprFun fm =
-  Map.toList fm <&> \(name, fun) -> T.unwords
-    [ pprFun (ppr name)
-    , "::"
-    , prettyPrintFunction fun
-    ]
+ppFunctionMap pprFun fm = catMaybes $ -- WIP: ignore non-forall functions for now
+  Map.toList fm <&> \(name, fun) ->
+    either (const Nothing) (ppTodo name) fun
+  where
+    ppTodo name fun = Just $
+      T.unwords
+        [ pprFun (ppr name)
+        , "::"
+        , prettyPrintFTF fun
+        ]
 
 prettyPrintFunction
   :: Either
@@ -263,7 +267,7 @@ parseType pprFun package dbg tyInit =
           case res of
             ForAllTy bndr ty' -> do
               let forall' = parseForall (Just forall_) bndr
-              goForall (parseForall (Just forall') bndr) ty'
+              goForall forall' ty'
             _ -> Nothing
         ([arg], res) -> do
             arg' <- toFgType' pprFun $ scaledThing arg
@@ -274,7 +278,7 @@ parseType pprFun package dbg tyInit =
                   pure $ FunctionTypeForall forall_ arg'' res''
             pure $
               either
-              (error . show) -- WIP: don't throw exception
+              throwError -- WIP: don't throw exception
               id
               eResult
         (_, _) -> Nothing
@@ -290,7 +294,7 @@ parseType pprFun package dbg tyInit =
                 pure $ Json.FunctionType arg'' res''
           pure $
             either
-            (error . show) -- WIP: don't throw exception
+            throwError -- WIP: don't throw exception
             id
             eResult
         _ -> Nothing
@@ -299,7 +303,10 @@ parseType pprFun package dbg tyInit =
       let mkForall = maybe (Right . Forall.singleton) (\forall' -> (`Forall.appendTyVar` forall')) mForall
           tyVarName = pprFun (ppr tyCoVar) -- WIP: correct?
           eForall = mkForall tyVarName
-      in either (error . show) id eForall -- WIP: don't throw exception
+      in either throwError id eForall -- WIP: don't throw exception
+
+    throwError showable =
+      error $ show showable ++ " -- " ++ T.unpack (pprFun $ ppr tyInit)
 
 showType :: Type -> String
 showType = \case
@@ -487,7 +494,7 @@ toFgType = \case
 toFgType'
   :: (SDoc -> T.Text)
   -> Type
-  -> Maybe (FgType (Either TyCon (TyVarApp TyCon TyVar)))
+  -> Maybe (FgType (Either TyCon TyVar))
 toFgType' pprFun ty =
   go ty
   where
@@ -495,53 +502,31 @@ toFgType' pprFun ty =
       TyConApp tyCon tyConList ->
         tyConAppToFgTypeTyCon go tyCon tyConList
       TyVarTy tyVar ->
-        pure $ FgType_TyConApp (Right $ TyVar tyVar) []
-      appTy@(AppTy fun arg) -> do
-        fun' <- go fun
-        arg' <- go arg
-        case fun' of
-          FgType_TyConApp (Right tyVar) _ -> do
-            pure $ FgType_TyConApp (Right $ TyVarApp tyVar arg') []
-          _ ->
-            -- 'TyConApp' is not allowed as first argument to 'AppTy'.
-            -- TODO: why is 'FgType_TyConApp (Right tyVar)' not a TyConApp and everything else is?
-            -- See docs: https://hackage.haskell.org/package/ghc-9.6.1/docs/GHC-Core-TyCo-Rep.html#v:AppTy
-            error $ unwords
-              [ "Unexpected TyConApp as first argument to AppTy:"
-              , (T.unpack . pprFun . ppr $ appTy) <> "."
-              , "Outer type:"
-              , T.unpack . pprFun . ppr $ ty
-              ]
+        pure $ FgType_TyConApp (Right tyVar) []
+      appTy@AppTy{} -> do
+        let goAppTy
+              :: [FgType (Either TyCon TyVar)] -- argument accumulator
+              -> Type -- first argument to 'AppTy'
+              -> Maybe (TyVar, [FgType (Either TyCon TyVar)]) -- ("function" type variable, arguments)
+            goAppTy acc = \case
+              TyVarTy tyVar -> Just (tyVar, acc)
+              AppTy fun2 arg2 -> do
+                arg2' <- go arg2
+                goAppTy (arg2' : acc) fun2
+              TyConApp{} ->
+                -- 'TyConApp' is not allowed as first argument to 'AppTy'.
+                -- TODO: why is 'FgType_TyConApp (Right tyVar)' not a TyConApp and everything else is?
+                -- See docs: https://hackage.haskell.org/package/ghc-9.6.1/docs/GHC-Core-TyCo-Rep.html#v:AppTy
+                error $ unwords
+                  [ "Unexpected TyConApp as first argument to AppTy:"
+                  , (T.unpack . pprFun . ppr $ appTy) <> "."
+                  , "Outer type:"
+                  , T.unpack . pprFun . ppr $ ty
+                  ]
+              _ -> Nothing
+        (tyVar, args) <- goAppTy [] appTy
+        pure $ FgType_TyConApp (Right tyVar) args
       _ -> Nothing
-
-data TyVarApp tyCon tyVar
-  = TyVar tyVar
-  | TyVarApp (TyVarApp tyCon tyVar) (FgType (Either tyCon (TyVarApp tyCon tyVar)))
-
--- 1. TyCon TyCon        : TyConApp TyCon [TyConApp TyCon []]
--- 2. TyCon TyVar        : TyConApp TyCon [TyConApp TyVar []]
--- 3. TyVar TyCon        : TyConApp TyVar [TyConApp TyCon []]
--- 4. TyVar TyVar        : TyConApp TyVar [TyConApp TyVar []]
--- 4. (TyVar TyVar) TyVar:
-blah :: forall tycon. tycon -> FgType (FgType tycon)
-blah tyVar =
-  let test :: FgType tycon
-      test = FgType_TyConApp tyVar []
-  in FgType_TyConApp
-    (FgType_TyConApp tyVar [test])
-    []
-
--- Rewrite: 'App (App (Var a) (Var b)) (Var c)` to 'TyConApp (Var a) [(Var b) (Var c)]
---    ->
-f :: (f a b) c -> b
-f = undefined
-
-f'' :: f (a b) -> b
-f'' = undefined
-
-
-f' :: (Either a) b -> b
-f' = undefined
 
 parsePackageFromUnitId
   :: (SDoc -> T.Text)
@@ -551,7 +536,3 @@ parsePackageFromUnitId pprFun unitId =
   either (error . ("BUG: parsePackageFromUnitId: " <>)) id (parsePackageWithVersion $ fullyQualify' unitId)
   where
     fullyQualify' = pprFun . fullyQualify
-
-{-# WARNING todo "Unfinished TODO" #-}
-todo :: a
-todo = error "TODO"

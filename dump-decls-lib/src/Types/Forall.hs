@@ -42,23 +42,35 @@ newtype TyVar tyVar = TyVar { unTyVar :: tyVar }
 getTyVar :: TyVar tyVar -> tyVar
 getTyVar = unTyVar
 
+-- WIP
 singleton
   :: tyVar
   -> Forall tyVar
-singleton = error "TODO"
+singleton tyVar =
+  Forall [tyVar]
 
 -- | Append a type variable to the end of the list of type variables in a @forall@
 appendTyVar
-  :: tyVar
+  :: Eq tyVar
+  => tyVar
   -> Forall tyVar
   -> Either (ForallError tyVar) (Forall tyVar)
-appendTyVar = error "TODO"
+appendTyVar tyVar (Forall ordSet) =
+  -- WIP
+  if tyVar `elem` ordSet
+    then Left $ DuplicateTypeVar (NE.fromList ordSet) tyVar
+    else Right $ Forall (tyVar : ordSet)
 
 lookupTyVar
-  :: tyVar
+  :: Eq tyVar
+  => tyVar
   -> Forall tyVar
   -> Either (ForallError tyVar) (TyVar tyVar)
-lookupTyVar = error "TODO"
+lookupTyVar tyVar (Forall ordSet) =
+  -- WIP
+  if tyVar `elem` ordSet
+    then Right (TyVar tyVar)
+    else Left $ NoSuchTypeVar (NE.fromList ordSet) tyVar
 
 data ForallError tyVar
   = DuplicateTypeVar -- ^ 'appendTyVar' was called attempting to introduce a type variable that already exists
