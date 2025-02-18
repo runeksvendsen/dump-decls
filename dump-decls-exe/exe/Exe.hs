@@ -133,11 +133,11 @@ getDefinitions pprFun pkg_nm = do
   unit_info <- case lookupUnitId unit_state unit_id of
     Just unit_info -> return unit_info
     Nothing -> fail "unknown package"
+  liftIO $ IO.hPutStrLn IO.stderr $ "getDefinitions " ++ pkg_nm
   mDefinitions <- reportUnitDecls pprFun unit_info
   forM_ mDefinitions $ \defs -> do
     let blah = concat $ map (ppFunctionMap pprFun) (Map.elems defs)
     void $ liftIO $ mapM (TIO.hPutStrLn IO.stderr) blah
-  liftIO $ IO.hPutStrLn IO.stderr $ "getDefinitions " ++ pkg_nm
   pure $ DeclarationMap unit_id <$> Nothing
 
 ppFunctionMap
