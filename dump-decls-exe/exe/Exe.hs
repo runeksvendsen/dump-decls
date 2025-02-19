@@ -314,17 +314,6 @@ parseType pprFun package dbg tyInit =
     throwError showable =
       error $ show showable ++ " -- " ++ T.unpack (pprFun $ ppr tyInit)
 
-showType :: Type -> String
-showType = \case
-  TyVarTy{} -> "TyVarTy"
-  AppTy {} -> "AppTy"
-  TyConApp {} -> "TyConApp"
-  ForAllTy {} -> "ForAllTy"
-  FunTy  {} -> "FunTy"
-  LitTy {} -> "LitTy"
-  CastTy{} -> "CastTy"
-  CoercionTy{} -> "CoercionTy"
-
 data DeclarationMap = DeclarationMap
   { declarationMap_package :: UnitId
   , declarationMap_moduleDeclarations :: Map ModuleName (Map Name (Json.FunctionType Type))
@@ -515,9 +504,9 @@ toFgType' pprFun ty =
         let goAppTy
               :: [FgType (Either TyCon TyVar)] -- "argument" accumulator. accumulates the second argument to "AppTy" (ie. the "argument" type).
               -> Type -- the first argument to 'AppTy' (ie. the "function" type variable)
-              -> Maybe (TyVar, [FgType (Either TyCon TyVar)]) -- ("function" type variable, argument type variables/constructors)
+              -> Maybe (FgType (Either TyCon TyVar))
             goAppTy acc = \case
-              TyVarTy tyVar -> Just (tyVar, acc)
+              tyVarTy@TyVarTy{} -> go tyVarTy
               AppTy fun2 arg2 -> do
                 arg2' <- go arg2
                 goAppTy (arg2' : acc) fun2
@@ -531,8 +520,7 @@ toFgType' pprFun ty =
                   , T.unpack . pprFun . ppr $ ty
                   ]
               _ -> Nothing
-        (tyVar, args) <- goAppTy [] appTy
-        pure $ FgType_TyConApp (Right tyVar) args
+        goAppTy [] appTy
       _ -> Nothing
 
 parsePackageFromUnitId
