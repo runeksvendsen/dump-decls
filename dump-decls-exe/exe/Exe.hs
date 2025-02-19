@@ -494,9 +494,9 @@ toFgType' pprFun ty =
   go ty
   where
     go = \case
-      TyConApp tyCon tyConList ->
+      TyConApp tyCon tyConList -> -- WIP: ignore unless only Type kind(s) -- e.g. no Constraints
         tyConAppToFgTypeTyCon go tyCon tyConList
-      TyVarTy tyVar ->
+      TyVarTy tyVar -> -- WIP: ignore unless only Type kind(s) -- e.g. no kind variables
         pure $ FgType_TyConApp (Right tyVar) []
       appTy@AppTy{} -> do
         -- Flatten nested AppTy's. Ie. converting nested AppTy's into (1) the "function" type variable and (2) the "argument" type variable(s)/constructor(s).
