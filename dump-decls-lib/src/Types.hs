@@ -184,6 +184,7 @@ renderTyConParseError e = T.unwords
 --   More will be added later, probably.
 --
 --   Type constructors that have special syntax are handled separately: lists, tuples, unit.
+-- TODO: consider splitting into (1) FgType_TyConApp, and (2) the "special types" list/tuple/unit
 data FgType tycon
   = FgType_TyConApp
     -- ^ A type consisting of (1) a type constructor,
