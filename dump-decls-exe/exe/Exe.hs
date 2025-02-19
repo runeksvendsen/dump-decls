@@ -144,16 +144,17 @@ ppFunctionMap
   :: (SDoc -> T.Text)
   -> FunctionMap
   -> [T.Text]
-ppFunctionMap pprFun fm = catMaybes $ -- WIP: ignore non-forall functions for now
+ppFunctionMap pprFun fm = catMaybes $ -- WIP: ignore non-forall functions for now -- WIP: ignore non-forall functions for now
+   -- WIP: ignore non-forall functions for now
   Map.toList fm <&> \(name, fun) ->
     either (const Nothing) (ppTodo name) fun
   where
-    ppTodo name fun = Just $
-      T.unwords
-        [ pprFun (ppr name)
-        , "::"
-        , prettyPrintFTF fun
-        ]
+    ppTodo name !fun = Nothing --  Just $
+      -- T.unwords
+      --   [ pprFun (ppr name)
+      --   , "::"
+      --   , prettyPrintFTF fun
+      --   ]
 
 prettyPrintFunction
   :: Either
@@ -227,7 +228,6 @@ reportModuleDecls pprFun unit_id modl_nm = do
     things <- mapM GHC.lookupName sorted_names
     let contents =
             [ (varName _id, blah)
-            -- Json.FunctionType (scaledThing arg) res
             | Just thing <- things
             , AnId _id <- [thing]
             , Just blah <- [parseType pprFun unit_id (modl_nm, varName _id) (varType _id)]
@@ -237,8 +237,6 @@ reportModuleDecls pprFun unit_id modl_nm = do
                 _ -> True
             ]
     pure $ Map.fromList contents
-
-type Lol = Type
 
 parseType
   :: (SDoc -> T.Text)
@@ -275,13 +273,21 @@ parseType pprFun package dbg tyInit =
             let eResult = do
                   arg'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) arg'
                   res'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) res'
-                  pure $ FunctionTypeForall forall_ arg'' res''
+                  let debugPrintDiff ftf =
+                        let ftfTxt = prettyPrintFTF ftf
+                            ftfTxtGhc = pprFun (ppr tyInit)
+                        in if ftfTxt /= ftfTxtGhc
+                          then T.unpack ("DIFF: " <> ftfTxt <> "\n      " <> ftfTxtGhc <> "\n") `trace` ftf
+                          else ftf
+                  pure $ (if doDebugPrintDiff then debugPrintDiff else id) $ FunctionTypeForall forall_ arg'' res''
             pure $
               either
               throwError -- WIP: don't throw exception
               id
               eResult
         (_, _) -> Nothing
+
+    doDebugPrintDiff = True
 
     goSimple ty =
       case splitFunTys ty of
@@ -504,10 +510,12 @@ toFgType' pprFun ty =
       TyVarTy tyVar ->
         pure $ FgType_TyConApp (Right tyVar) []
       appTy@AppTy{} -> do
+        -- Flatten nested AppTy's. Ie. converting nested AppTy's into (1) the "function" type variable and (2) the "argument" type variable(s)/constructor(s).
+        -- E.g. from "((f a) b) c" to "FgType_TyConApp (Right f) [a, b, c]"
         let goAppTy
-              :: [FgType (Either TyCon TyVar)] -- argument accumulator
-              -> Type -- first argument to 'AppTy'
-              -> Maybe (TyVar, [FgType (Either TyCon TyVar)]) -- ("function" type variable, arguments)
+              :: [FgType (Either TyCon TyVar)] -- "argument" accumulator. accumulates the second argument to "AppTy" (ie. the "argument" type).
+              -> Type -- the first argument to 'AppTy' (ie. the "function" type variable)
+              -> Maybe (TyVar, [FgType (Either TyCon TyVar)]) -- ("function" type variable, argument type variables/constructors)
             goAppTy acc = \case
               TyVarTy tyVar -> Just (tyVar, acc)
               AppTy fun2 arg2 -> do
@@ -515,7 +523,6 @@ toFgType' pprFun ty =
                 goAppTy (arg2' : acc) fun2
               TyConApp{} ->
                 -- 'TyConApp' is not allowed as first argument to 'AppTy'.
-                -- TODO: why is 'FgType_TyConApp (Right tyVar)' not a TyConApp and everything else is?
                 -- See docs: https://hackage.haskell.org/package/ghc-9.6.1/docs/GHC-Core-TyCo-Rep.html#v:AppTy
                 error $ unwords
                   [ "Unexpected TyConApp as first argument to AppTy:"
