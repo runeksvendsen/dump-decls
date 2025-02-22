@@ -203,7 +203,7 @@ data FgType tycon
   -- ^ A list
   | FgType_Tuple Boxity (FgType tycon) (NE.NonEmpty (FgType tycon))
   -- ^ A tuple of size @1 + length nonEmptyList@
-  | FgType_Unit
+  | FgType_Unit Boxity
   -- ^ Unit ('()')
     deriving (Eq, Show, Ord, Foldable, Generic)
 
@@ -215,8 +215,8 @@ instance Functor FgType where
       FgType_List $ fmap f bty
     FgType_Tuple boxity bty neBty ->
       FgType_Tuple boxity (fmap f bty) (NE.map (fmap f) neBty)
-    FgType_Unit ->
-      FgType_Unit
+    FgType_Unit b ->
+      FgType_Unit b
 
 instance Traversable FgType where
   traverse f = \case
@@ -226,8 +226,8 @@ instance Traversable FgType where
       FgType_List <$> traverse f bty
     FgType_Tuple boxity bty neBty ->
       FgType_Tuple boxity <$> traverse f bty <*> traverse (traverse f) neBty
-    FgType_Unit ->
-      pure FgType_Unit
+    FgType_Unit b ->
+      pure $ FgType_Unit b
 
 -- | A /boxed/ value is one that's represented by a pointer to the actual data representing the value.
 --   An /unboxed/ value is represented by the actual data (no pointer).
@@ -265,11 +265,12 @@ instance (A.ToJSON tycon) => A.ToJSON (FgType tycon) where
       let key = case boxity of {Unboxed -> "tuple#"; Boxed -> "tuple"}
       in A.object
         [(key, A.toJSON $ bty : NE.toList neBty)]
-    FgType_Unit -> A.String "unit"
+    FgType_Unit b -> A.String $ "unit" <> if b == Unboxed then "#" else ""
 
 instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
   parseJSON = \case
-    A.String "unit" -> pure FgType_Unit
+    A.String "unit" -> pure $ FgType_Unit Boxed
+    A.String "unit#" -> pure $ FgType_Unit Boxed
     A.Object o -> parseObject o
     val -> failParse val
     where
@@ -369,8 +370,10 @@ renderFgTypeGeneric mkLiteral renderTycon fgType' =
         mkLiteral "[" <> go False fgType <> mkLiteral "]"
       FgType_Tuple boxity fgType fgTypeList ->
         tupleParens boxity $ mconcat $ Data.List.intersperse (mkLiteral ", ") $ map (go False) (fgType : NE.toList fgTypeList)
-      FgType_Unit ->
+      FgType_Unit Boxed ->
         mkLiteral "()"
+      FgType_Unit Unboxed ->
+        tupleParens Unboxed (mkLiteral " ")
   in go False fgType'
 
 -- | Render only the 'fgTyConName' of the 'FgTyCon'.

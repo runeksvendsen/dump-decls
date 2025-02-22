@@ -475,8 +475,8 @@ tyConAppToFgTypeTyCon
      -- ^ Second argument to 'TyConApp'
   -> Maybe (FgType (Either TyCon a))
 tyConAppToFgTypeTyCon recurse tyCon = \case
-  [] | isTupleTyCon tyCon -> do -- unit
-      pure FgType_Unit
+  [] | isTupleTyCon tyCon, Just boxity <- tupleBoxity tyCon -> do -- unit
+      pure $ FgType_Unit boxity
   (ty1:ty2:tyTail) | Just boxity <- tupleBoxity tyCon -> do -- tuple (of size >= 2)
       ty1' <- recurse ty1
       tyTail' <- mapM recurse (ty2 NE.:| tyTail)
