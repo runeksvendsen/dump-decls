@@ -15,9 +15,9 @@ import qualified Json
 import Types.Doodle -- TODO
 import GHC hiding (moduleName)
 import qualified GHC.Paths
-import GHC.Core.Type (splitFunTys, expandTypeSynonyms)
+import GHC.Core.Type (splitFunTys, expandTypeSynonyms, isLiftedTypeKind, isConstraintKind, returnsConstraintKind, typeKind)
 import GHC.Driver.Ppr (showSDocForUser)
-import GHC.Unit.State (lookupUnitId, lookupPackageName)
+import GHC.Unit.State (lookupUnitId, lookupPackageName, pprWithUnitState)
 import GHC.Unit.Info (UnitInfo, unitExposedModules, unitId, PackageName(..))
 import GHC.Unit.Types (UnitId)
 import GHC.Data.FastString (fsLit)
@@ -26,7 +26,7 @@ import GHC.Utils.Outputable hiding (sep, (<>))
 import GHC.Types.TyThing (tyThingParent_maybe)
 import GHC.Types.Name (nameOccName, getSrcLoc)
 import GHC.Types.Name.Occurrence (OccName)
-import GHC.Types.Var (varName, varType, VarBndr (Bndr))
+import GHC.Types.Var (varName, varType, VarBndr (Bndr), tyVarKind)
 import Data.Function (on)
 import Data.List (sortBy, foldl')
 import System.Environment (getArgs)
@@ -55,6 +55,7 @@ import qualified Types.Forall as Forall
 import Data.Either (fromLeft, fromRight)
 import Data.Functor ((<&>), void)
 import qualified Data.Text.IO as TIO
+import qualified GHC.Driver.Session
 
 main :: IO ()
 main = do
@@ -66,8 +67,8 @@ main = do
     ghcLibDir : (first_package_name : _) ->
       runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\lol -> pure $ (lol, ghcLibDir))
   lst <- forM pkg_names $ \pkg_nm -> do
-    unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions pprFun pkg_nm) >>= logErrors
-  let declarationMapJsonList = map (declarationMapToJson pprFun) (catMaybes lst)
+    unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
+  let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds)) (catMaybes lst)
   forM_ declarationMapJsonList $ \declarationMapJson -> do
     let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
     forM_ errors $ \(modName, pkgErrs) ->
@@ -121,7 +122,14 @@ getPprFun pkg_nm = do
   dflags <- setDFlags pkg_nm
   unit_state <- hsc_units <$> getSession
   name_ppr_ctx <- GHC.getNamePprCtx
-  pure $ T.pack . showSDocForUser dflags unit_state name_ppr_ctx
+  pure $ T.pack . showSDocForUser' dflags unit_state name_ppr_ctx
+  where
+    showSDocForUser' dflags unit_state name_ppr_ctx doc =
+      let sty  = mkUserStyle name_ppr_ctx AllTheWay
+          doc' = GHC.Unit.State.pprWithUnitState unit_state doc
+          sDocContext = GHC.Driver.Session.initSDocContext dflags sty
+          blahTodo sDocContext' = sDocContext'{sdocSuppressVarKinds = True, sdocPrintExplicitKinds = False, sdocStarIsType = True}
+      in renderWithContext (blahTodo sDocContext) doc'
 
 getDefinitions :: (SDoc -> T.Text) -> String -> Ghc (Maybe DeclarationMap)
 getDefinitions pprFun pkg_nm = do
@@ -252,7 +260,7 @@ parseType pprFun package dbg tyInit =
   case splitFunTys tyInit of
     ([], res) ->
       case res of
-        ForAllTy bndr ty' ->
+        ForAllTy bndr ty' | isTypeKind bndr ->
           Right <$> goForall (parseForall Nothing bndr) ty'
         _ -> Nothing
     ([_], _) ->
@@ -263,11 +271,10 @@ parseType pprFun package dbg tyInit =
       case splitFunTys ty of
         ([], res) ->
           case res of
-            ForAllTy bndr ty' -> do
-              let forall' = parseForall (Just forall_) bndr
-              goForall forall' ty'
+            ForAllTy bndr ty' | isTypeKind bndr -> do
+              goForall (parseForall (Just forall_) bndr) ty'
             _ -> Nothing
-        ([arg], res) -> do
+        ([arg], res) | not (returnsConstraintKind $ GHC.Core.Type.typeKind (scaledThing arg)) -> do
             arg' <- toFgType' pprFun $ scaledThing arg
             res' <- toFgType' pprFun res
             let eResult = do
@@ -305,7 +312,7 @@ parseType pprFun package dbg tyInit =
             eResult
         _ -> Nothing
 
-    parseForall mForall (Bndr tyCoVar forAllTyFlag) =
+    parseForall mForall (Bndr tyCoVar _) =
       let mkForall = maybe (Right . Forall.singleton) (\forall' -> (`Forall.appendTyVar` forall')) mForall
           tyVarName = pprFun (ppr tyCoVar) -- WIP: correct?
           eForall = mkForall tyVarName
@@ -313,6 +320,10 @@ parseType pprFun package dbg tyInit =
 
     throwError showable =
       error $ show showable ++ " -- " ++ T.unpack (pprFun $ ppr tyInit)
+
+    -- is kind *
+    isTypeKind (Bndr tyVar _) =
+      isLiftedTypeKind (tyVarKind tyVar) && not (isConstraintKind $ tyVarKind tyVar)
 
 data DeclarationMap = DeclarationMap
   { declarationMap_package :: UnitId
@@ -423,6 +434,10 @@ tyConToFgTyCon pprFun package (modName, functionName) tyCon =
       , tyConParseErrorSrcLoc = pprFun (ppr $ getSrcLoc tyCon)
       }
 
+pprSuppressVarKinds :: SDoc -> SDoc
+pprSuppressVarKinds =
+  updSDocContext (\sDocContext -> sDocContext{sdocSuppressVarKinds = True, sdocPrintExplicitKinds = False})
+
 fullyQualify :: Outputable a => a -> SDoc
 fullyQualify =
   withUserStyle fullyQualify' AllTheWay . ppr
@@ -496,7 +511,7 @@ toFgType' pprFun ty =
     go = \case
       TyConApp tyCon tyConList -> -- WIP: ignore unless only Type kind(s) -- e.g. no Constraints
         tyConAppToFgTypeTyCon go tyCon tyConList
-      TyVarTy tyVar -> -- WIP: ignore unless only Type kind(s) -- e.g. no kind variables
+      TyVarTy tyVar ->
         pure $ FgType_TyConApp (Right tyVar) []
       appTy@AppTy{} -> do
         -- Flatten nested AppTy's. Ie. converting nested AppTy's into (1) the "function" type variable and (2) the "argument" type variable(s)/constructor(s).
