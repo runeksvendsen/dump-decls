@@ -42,7 +42,7 @@ specPutStrLn =
   where
     tyConIO = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
     tyConString = parsePprTyCon "base-4.18.0.0:GHC.Base.String"
-    tyConAppIOUnit = Types.FgType_TyConApp tyConIO [Types.FgType_Unit] -- IO ()
+    tyConAppIOUnit = Types.FgType_TyConApp tyConIO [Types.FgType_Unit Types.Boxed] -- IO ()
 
     tiPutStrLn =
       Json.TypeInfo
