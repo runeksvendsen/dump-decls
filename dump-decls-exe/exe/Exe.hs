@@ -59,13 +59,13 @@ import qualified GHC.Driver.Session
 
 main :: IO ()
 main = do
-  pkg_names <- getArgs
+  args <- getArgs
   let runGhc' :: FilePath -> Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
       runGhc' libdir action = reallyCatch $ runGhc (Just libdir) action
-  (pprFun, ghcLibDir) <- case pkg_names of
+  (pprFun, ghcLibDir, pkg_names) <- case args of
     [] -> Exit.die "Missing argument(s): one or more packages"
-    ghcLibDir : (first_package_name : _) ->
-      runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\lol -> pure $ (lol, ghcLibDir))
+    ghcLibDir : pkg_names@(first_package_name : _) ->
+      runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\pprFun -> pure $ (pprFun, ghcLibDir, pkg_names))
   lst <- forM pkg_names $ \pkg_nm -> do
     unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
   let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds)) (catMaybes lst)
@@ -141,7 +141,7 @@ getDefinitions pprFun pkg_nm = do
   unit_info <- case lookupUnitId unit_state unit_id of
     Just unit_info -> return unit_info
     Nothing -> fail "unknown package"
-  liftIO $ IO.hPutStrLn IO.stderr $ "getDefinitions " ++ pkg_nm
+  liftIO $ IO.hPutStrLn IO.stderr $ "   getDefinitions " ++ pkg_nm
   mDefinitions <- reportUnitDecls pprFun unit_info
   forM_ mDefinitions $ \defs -> do
     let blah = concat $ map (ppFunctionMap pprFun) (Map.elems defs)
@@ -157,12 +157,12 @@ ppFunctionMap pprFun fm = catMaybes $ -- WIP: ignore non-forall functions for no
   Map.toList fm <&> \(name, fun) ->
     either (const Nothing) (ppTodo name) fun
   where
-    ppTodo name !fun = Nothing --  Just $
-      -- T.unwords
-      --   [ pprFun (ppr name)
-      --   , "::"
-      --   , prettyPrintFTF fun
-      --   ]
+    ppTodo name !fun = Just $
+      T.unwords
+        [ pprFun (ppr name)
+        , "::"
+        , prettyPrintFTFGeneric renderFgTyConUnqualified fun
+        ]
 
 prettyPrintFunction
   :: Either
@@ -190,6 +190,21 @@ prettyPrintFTF ftf = T.unwords
     renderFgType' :: FgType (Either (FgTyCon T.Text) (Forall.TyVar T.Text)) -> T.Text
     renderFgType' =
       renderFgType (either renderFgTyConQualifiedNoPackage Forall.getTyVar)
+
+prettyPrintFTFGeneric
+  :: (FgTyCon T.Text -> T.Text)
+  -> FunctionTypeForall T.Text T.Text
+  -> T.Text
+prettyPrintFTFGeneric renderFgTyCon ftf = T.unwords
+  [ Forall.renderForall id $ ftf_forall ftf
+  , renderFgType' $ ftf_arg ftf
+  , "->"
+  , renderFgType' $ ftf_ret ftf
+  ]
+  where
+    renderFgType' :: FgType (Either (FgTyCon T.Text) (Forall.TyVar T.Text)) -> T.Text
+    renderFgType' =
+      renderFgType (either renderFgTyCon Forall.getTyVar)
 
 type FunctionMap =
   Map
@@ -281,10 +296,12 @@ parseType pprFun package dbg tyInit =
                   arg'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) arg'
                   res'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) res'
                   let debugPrintDiff ftf =
-                        let ftfTxt = prettyPrintFTF ftf
-                            ftfTxtGhc = pprFun (ppr tyInit)
+                        let ftfTxt = prettyPrintFTFGeneric renderFgTyConQualified ftf
+                            ftfTxtGhc = pprFun $ fullyQualify $ ppr tyInit
+                            nameTxt = pprFun $ ppr (snd dbg)
+                        -- TODO: add this to a test suite!!
                         in if ftfTxt /= ftfTxtGhc
-                          then T.unpack ("DIFF: " <> ftfTxt <> "\n      " <> ftfTxtGhc <> "\n") `trace` ftf
+                          then T.unpack ("DIFF: " <> nameTxt <> "\n      " <> ftfTxt <> "\n      " <> ftfTxtGhc <> "\n") `trace` ftf
                           else ftf
                   pure $ (if doDebugPrintDiff then debugPrintDiff else id) $ FunctionTypeForall forall_ arg'' res''
             pure $

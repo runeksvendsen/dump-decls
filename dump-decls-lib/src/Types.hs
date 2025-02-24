@@ -16,7 +16,7 @@ module Types
 , Boxity(..)
 , isBoxed
   -- * 'FgTyCon'
-, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, renderFgTyConQualifiedNoPackage, TyConParseError(..), renderTyConParseError, tgTyConHackageSrcUrl
+, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, renderFgTyConQualifiedNoPackage, renderFgTyConUnqualified, TyConParseError(..), renderTyConParseError, tgTyConHackageSrcUrl
   -- * Rendering 'FgType (FgTyCon T.Text)'
 , renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified, renderFgTypeFgTyConQualifiedNoPackage, fgTypeHackageSrcUrlsHtml
   -- * 'FgPackage'
@@ -94,6 +94,12 @@ renderFgTyConQualifiedNoPackage tc =
     , "."
     , fgTyConName tc
     ]
+
+-- TODO: docs
+renderFgTyConUnqualified
+  :: FgTyCon T.Text
+  -> T.Text
+renderFgTyConUnqualified = fgTyConName
 
 -- | Render as Hackage source URL.
 --
