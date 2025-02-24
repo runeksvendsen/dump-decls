@@ -11,7 +11,7 @@ type FunctionTypeNoTyVar =
   FunctionType (FgType (FgTyCon T.Text))
 
 data FunctionTypeForall tyVar text = FunctionTypeForall
-  { ftf_forall :: Forall text
+  { ftf_forall :: Forall T.Text
   , ftf_arg :: FgType (Either (FgTyCon text) (TyVar tyVar))
   , ftf_ret :: FgType (Either (FgTyCon text) (TyVar tyVar))
   }
