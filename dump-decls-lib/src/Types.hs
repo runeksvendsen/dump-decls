@@ -387,7 +387,7 @@ renderFgTypeGeneric mkLiteral renderTycon fgType' =
 -- Examples:
 --
 -- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
--- >>> renderFgTypeFgTyConUnqualified $ FgType_TyConApp ioTycon [FgType_Unit]
+-- >>> renderFgTypeFgTyConUnqualified $ FgType_TyConApp ioTycon [FgType_Unit Boxed]
 -- "IO ()"
 renderFgTypeFgTyConUnqualified
   :: FgType (FgTyCon T.Text)
@@ -400,7 +400,7 @@ renderFgTypeFgTyConUnqualified =
 -- Examples:
 --
 -- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
--- >>> renderFgTypeFgTyConQualified $ FgType_TyConApp ioTycon [FgType_Unit]
+-- >>> renderFgTypeFgTyConQualified $ FgType_TyConApp ioTycon [FgType_Unit Boxed]
 -- "ghc-prim-0.10.0:GHC.Types.IO ()"
 renderFgTypeFgTyConQualified
   :: FgType (FgTyCon T.Text)
@@ -413,7 +413,7 @@ renderFgTypeFgTyConQualified =
 -- Examples:
 --
 -- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
--- >>> renderFgTypeFgTyConQualifiedNoPackage $ FgType_TyConApp ioTycon [FgType_Unit]
+-- >>> renderFgTypeFgTyConQualifiedNoPackage $ FgType_TyConApp ioTycon [FgType_Unit Boxed]
 -- "GHC.Types.IO ()"
 renderFgTypeFgTyConQualifiedNoPackage
   :: FgType (FgTyCon T.Text)
