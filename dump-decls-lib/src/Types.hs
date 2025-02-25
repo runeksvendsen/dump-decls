@@ -327,7 +327,7 @@ instance (NFData tycon) => NFData (FgType tycon)
 -- >>> renderFgType id $ FgType_List $ FgType_Tuple Boxed (FgType_TyConApp "Key" []) (NE.singleton $ FgType_TyConApp "Value" [])
 -- "[(Key, Value)]"
 --
--- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "IO" [FgType_Unit]]
+-- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "IO" [FgType_Unit Boxed]]
 -- "Either String (IO ())"
 renderFgType
   :: forall tycon.
@@ -349,7 +349,7 @@ renderFgType = renderFgTypeGeneric id
 -- >>> let either' = FgTyCon "Either" "" (FgPackage "" "")
 -- >>> let text' = FgTyCon "Text" "" (FgPackage "" "")
 -- >>> let io' = FgTyCon "IO" "" (FgPackage "" "")
--- >>> let eitherStringValue = FgType_TyConApp either' [FgType_TyConApp text' [], FgType_TyConApp io' [FgType_Unit]]
+-- >>> let eitherStringValue = FgType_TyConApp either' [FgType_TyConApp text' [], FgType_TyConApp io' [FgType_Unit Boxed]]
 -- >>> renderFgTypeGeneric (\str -> TyConOrText [Left str]) (\tyCon -> TyConOrText [Right $ fgTyConName tyCon]) eitherStringValue
 -- TyConOrText [Right "Either",Left " ",Right "Text",Left " ",Left "(",Right "IO",Left " ",Left "()",Left ")"]
 renderFgTypeGeneric
