@@ -209,7 +209,7 @@ data FgType tycon
   -- ^ A list
   | FgType_Tuple Boxity (FgType tycon) (NE.NonEmpty (FgType tycon))
   -- ^ A tuple of size @1 + length nonEmptyList@
-  | FgType_Unit Boxity
+  | FgType_Unit Boxity -- TODO: Replace 'Boxity' argument with an additional `FgType_UnboxedUnit` constructor?
   -- ^ Unit ('()')
     deriving (Eq, Show, Ord, Foldable, Generic)
 
