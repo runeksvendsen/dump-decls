@@ -316,8 +316,8 @@ parseType pprFun package dbg tyInit =
     goSimple ty =
       case splitFunTys ty of
         ([arg], res) -> do
-          arg' <- toFgType $ scaledThing arg
-          res' <- toFgType res
+          arg' <- toFgType pprFun $ scaledThing arg
+          res' <- toFgType pprFun res
           let eResult = do
                 arg'' <- traverse (tyConToFgTyCon pprFun package dbg) arg'
                 res'' <- traverse (tyConToFgTyCon pprFun package dbg) res'
@@ -390,8 +390,8 @@ declarationMapToJson pprFun dm =
       -> Json.FunctionType Type
       -> Maybe (Either TyConParseError (Json.TypeInfo (FgType (FgTyCon T.Text))))
     funtionTypeToTypeInfo dbg funType = do
-      funTyExpanded <- traverse (toFgType . expandTypeSynonyms) funType
-      funTy <- traverse toFgType funType
+      funTyExpanded <- traverse (toFgType pprFun . expandTypeSynonyms) funType
+      funTy <- traverse (toFgType pprFun) funType
       let funTypeInfo = Json.TypeInfo
             { Json.typeInfo_expanded = if funTyExpanded == funTy then Nothing else Just funTyExpanded
             , Json.typeInfo_unexpanded = funTy
@@ -482,7 +482,8 @@ noQualify =
 
 -- | Convert a 'TyConApp' to a 'FgType TyCon'
 tyConAppToFgTypeTyCon
-  :: (KindOrType -> Maybe (FgType (Either TyCon a)))
+  :: (SDoc -> T.Text)
+  -> (KindOrType -> Maybe (FgType (Either TyCon a)))
      -- ^ Recursive case
      --
      -- TODO: why 'Maybe' and 'Either'?
@@ -491,7 +492,7 @@ tyConAppToFgTypeTyCon
   -> [KindOrType]
      -- ^ Second argument to 'TyConApp'
   -> Maybe (FgType (Either TyCon a))
-tyConAppToFgTypeTyCon recurse tyCon = \case
+tyConAppToFgTypeTyCon pprFun recurse tyCon tyConArgList = case assertSaturated of
   [] | isTupleTyCon tyCon, Just boxity <- tupleBoxity tyCon -> do -- unit
       pure $ FgType_Unit boxity
   (ty1:ty2:tyTail) | Just boxity <- tupleBoxity tyCon -> do -- tuple (of size >= 2)
@@ -510,13 +511,21 @@ tyConAppToFgTypeTyCon recurse tyCon = \case
       | isBoxedTupleTyCon tyCon = Just Types.Boxed
       | otherwise = Nothing
 
+    assertSaturated =
+      if length tyConArgList == tyConArity tyCon
+        then tyConArgList
+        else error $ "BUG: unexpected unsaturated type constructor. TyCon: " <> T.unpack (pprFun (ppr tyCon)) <> ", Args: " <> T.unpack (pprFun (ppr tyConArgList))
+
 -- | Convert a 'Type' to a 'FgType'. Only 'TyConApp' is supported currently.
-toFgType :: Type -> Maybe (FgType TyCon)
-toFgType = \case
-  TyConApp tyCon tyConList ->
-    fmap (fromLeft (error "toFgType: impossible")) <$>
-      tyConAppToFgTypeTyCon (fmap (fmap Left) . toFgType) tyCon tyConList
-  _ -> Nothing
+toFgType :: (SDoc -> T.Text) -> Type -> Maybe (FgType TyCon)
+toFgType pprFun =
+  go
+  where
+    go = \case
+      TyConApp tyCon tyConList ->
+        fmap (fromLeft (error "toFgType: impossible")) <$>
+          tyConAppToFgTypeTyCon pprFun (fmap (fmap Left) . go) tyCon tyConList
+      _ -> Nothing
 
 toFgType'
   :: (SDoc -> T.Text)
@@ -526,8 +535,8 @@ toFgType' pprFun ty =
   go ty
   where
     go = \case
-      TyConApp tyCon tyConList -> -- WIP: ignore unless only Type kind(s) -- e.g. no Constraints
-        tyConAppToFgTypeTyCon go tyCon tyConList
+      TyConApp tyCon tyConList ->
+        tyConAppToFgTypeTyCon pprFun go tyCon tyConList
       TyVarTy tyVar ->
         pure $ FgType_TyConApp (Right tyVar) []
       appTy@AppTy{} -> do
