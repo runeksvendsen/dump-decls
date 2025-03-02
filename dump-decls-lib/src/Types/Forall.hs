@@ -27,6 +27,7 @@ toOrderedList = reverse -- TODO use Data.Foldable.toList for the real OSet
 --   This part of the type signature /introduces/ type variables, which are
 --   then referenced in the part of the type signature that follows.
 newtype Forall tyVar = Forall (OrdSet tyVar)
+  deriving (Eq, Show, Ord)
 
 renderForall
   :: (tyVar -> T.Text)
@@ -41,6 +42,7 @@ renderForall renderTyVar (Forall ordSet) =
 --   This part of the type signature /references/ type variables introduced
 --   by the @forall@ part of the type signature.
 newtype TyVar tyVar = TyVar { unTyVar :: tyVar }
+  deriving (Show, Eq, Ord)
 
 getTyVar :: TyVar tyVar -> tyVar
 getTyVar = unTyVar
