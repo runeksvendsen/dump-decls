@@ -20,7 +20,7 @@ import qualified Data.List.NonEmpty as NE
 main :: IO ()
 main = do
   (stdout, ()) <- System.IO.Silently.capture $
-    withArgs ["base", "text"] Exe.main
+    withArgs ["/nix/store/icq948yaf8v17a464ciz38czigq0vccb-ghc-9.6.2/lib/ghc-9.6.2/lib", "base", "text"] Exe.main -- WIP!
   let stdoutBs = Data.ByteString.Lazy.Char8.pack stdout
   declarationMapJson :: [Json.DeclarationMapJson T.Text] <-
       either
