@@ -205,10 +205,14 @@ data FgType tycon
       --  (e.g. 'Int', 'Char', 'Data.Text.Text') and otherwise one type for all type variables
       --  of the type constructor (since we're only looking at the types of functions
       --  exported from a module where a partially applied type constructor is invalid).
-  | FgType_List (FgType tycon)
+  | FgType_List (Maybe (FgType tycon))
   -- ^ A list
-  | FgType_Tuple Boxity (FgType tycon) (NE.NonEmpty (FgType tycon))
-  -- ^ A tuple of size @1 + length nonEmptyList@
+  --
+  --   TODO: why 'Maybe'?
+  | FgType_Tuple -- A tuple
+      Boxity
+      Word -- ^ Size
+      [FgType tycon] -- Arguments (not necessarily saturated)
   | FgType_Unit Boxity -- TODO: Replace 'Boxity' argument with an additional `FgType_UnboxedUnit` constructor?
   -- ^ Unit ('()')
     deriving (Eq, Show, Ord, Foldable, Generic)
@@ -218,9 +222,9 @@ instance Functor FgType where
     FgType_TyConApp tycon tyList ->
       FgType_TyConApp (f tycon) (map (fmap f) tyList)
     FgType_List bty ->
-      FgType_List $ fmap f bty
-    FgType_Tuple boxity bty neBty ->
-      FgType_Tuple boxity (fmap f bty) (NE.map (fmap f) neBty)
+      FgType_List $ fmap (fmap f) bty
+    FgType_Tuple boxity size lst ->
+      FgType_Tuple boxity size (map (fmap f) lst)
     FgType_Unit b ->
       FgType_Unit b
 
@@ -229,9 +233,9 @@ instance Traversable FgType where
     FgType_TyConApp tycon tyList ->
       FgType_TyConApp <$> f tycon <*> traverse (traverse f) tyList
     FgType_List bty ->
-      FgType_List <$> traverse f bty
-    FgType_Tuple boxity bty neBty ->
-      FgType_Tuple boxity <$> traverse f bty <*> traverse (traverse f) neBty
+      FgType_List <$> traverse (traverse f) bty
+    FgType_Tuple boxity size lst ->
+      FgType_Tuple boxity size <$> traverse (traverse f) lst
     FgType_Unit b ->
       pure $ FgType_Unit b
 
@@ -267,10 +271,10 @@ instance (A.ToJSON tycon) => A.ToJSON (FgType tycon) where
       [("type", A.object [("tycon" :: Compat.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
     FgType_List bty -> A.object
       [("list", A.toJSON bty)]
-    FgType_Tuple boxity bty neBty ->
+    FgType_Tuple boxity size args -> -- WIP: size
       let key = case boxity of {Unboxed -> "tuple#"; Boxed -> "tuple"}
       in A.object
-        [(key, A.toJSON $ bty : NE.toList neBty)]
+        [(key, A.toJSON args)]
     FgType_Unit b -> A.String $ "unit" <> if b == Unboxed then "#" else ""
 
 instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
@@ -309,8 +313,8 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
         maybe empty (A.parseJSON >=> mkType) (Compat.lookup keyTxt o)
 
       tupleFromList boxity = \case
-        ty1:ty2:tyTail ->
-          pure $ FgType_Tuple boxity ty1 (ty2 NE.:| tyTail)
+        args@(_:_:_) ->
+          pure $ FgType_Tuple boxity (error "WIP: size") args
         other ->
           fail $ "Tuple size must be >= 2 but size is: " <> show (length other)
 
@@ -324,11 +328,15 @@ instance (NFData tycon) => NFData (FgType tycon)
 -- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "Value" []]
 -- "Either String Value"
 --
--- >>> renderFgType id $ FgType_List $ FgType_Tuple Boxed (FgType_TyConApp "Key" []) (NE.singleton $ FgType_TyConApp "Value" [])
+-- >>> renderFgType id $ FgType_List $ Just $ FgType_Tuple Boxed 2 [FgType_TyConApp "Key" [], FgType_TyConApp "Value" []]
 -- "[(Key, Value)]"
 --
 -- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "IO" [FgType_Unit Boxed]]
 -- "Either String (IO ())"
+--
+-- Example: unsaturated tuple:
+-- >>> renderFgType id $ FgType_Tuple Boxed 4 [FgType_TyConApp "String" [], FgType_TyConApp "Int" []]
+-- "(,,,) String Int"
 renderFgType
   :: forall tycon.
      (tycon -> T.Text)
@@ -372,10 +380,17 @@ renderFgTypeGeneric mkLiteral renderTycon fgType' =
       FgType_TyConApp tycon fgTypeList ->
         (if not (null fgTypeList) && parenthesize then parens else id) $
           mconcat $ Data.List.intersperse (mkLiteral " ") $ renderTycon tycon : map (go True) fgTypeList
-      FgType_List fgType ->
+      FgType_List Nothing ->
+        mkLiteral "[]"
+      FgType_List (Just fgType) ->
         mkLiteral "[" <> go False fgType <> mkLiteral "]"
-      FgType_Tuple boxity fgType fgTypeList ->
-        tupleParens boxity $ mconcat $ Data.List.intersperse (mkLiteral ", ") $ map (go False) (fgType : NE.toList fgTypeList)
+      FgType_Tuple boxity size fgTypeList | length fgTypeList == fromIntegral size ->
+        tupleParens boxity $ mconcat $ Data.List.intersperse (mkLiteral ", ") $ map (go False) fgTypeList
+      FgType_Tuple boxity size fgTypeList -> -- unsaturated or over-saturated
+        mconcat $ Data.List.intersperse (mkLiteral " ") $
+          tupleParens boxity (mconcat $ Data.List.replicate (fromIntegral size - 1) (mkLiteral ","))
+
+          : map (go True) fgTypeList
       FgType_Unit Boxed ->
         mkLiteral "()"
       FgType_Unit Unboxed ->

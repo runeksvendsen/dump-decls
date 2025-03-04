@@ -492,29 +492,27 @@ tyConAppToFgTypeTyCon
   -> [KindOrType]
      -- ^ Second argument to 'TyConApp'
   -> Maybe (FgType (Either TyCon a))
-tyConAppToFgTypeTyCon pprFun recurse tyCon tyConArgList = case assertSaturated of
-  [] | isTupleTyCon tyCon, Just boxity <- tupleBoxity tyCon -> do -- unit
+tyConAppToFgTypeTyCon pprFun recurse tyCon = \case
+  [] | isTupleTyCon tyCon, Just boxity <- tupleBoxity -> do -- unit
       pure $ FgType_Unit boxity
-  (ty1:ty2:tyTail) | Just boxity <- tupleBoxity tyCon -> do -- tuple (of size >= 2)
-      ty1' <- recurse ty1
-      tyTail' <- mapM recurse (ty2 NE.:| tyTail)
-      pure $ FgType_Tuple boxity ty1' tyTail'
-  [ty1] | getUnique tyCon == listTyConKey -> do -- list
-    ty1' <- recurse ty1
-    pure $ FgType_List ty1'
+  args@(_:_:_) | Just boxity <- tupleBoxity -> do -- tuple (of size >= 2)
+      args' <- mapM recurse args
+      pure $ FgType_Tuple boxity (fromIntegral $ tyConArity tyCon) args'
+  mTy | getUnique tyCon == listTyConKey -> do -- list
+    case mTy of
+      [] -> pure $ FgType_List Nothing
+      [ty1] -> do
+        ty1' <- recurse ty1
+        pure $ FgType_List (Just ty1')
+      _ -> Nothing
   tyList -> do -- neither a tuple nor a list
     tyList' <- mapM recurse tyList
     pure $ FgType_TyConApp (Left tyCon) tyList'
   where
-    tupleBoxity tyCon
+    tupleBoxity
       | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
       | isBoxedTupleTyCon tyCon = Just Types.Boxed
       | otherwise = Nothing
-
-    assertSaturated =
-      if length tyConArgList == tyConArity tyCon
-        then tyConArgList
-        else error $ "BUG: unexpected unsaturated type constructor. TyCon: " <> T.unpack (pprFun (ppr tyCon)) <> ", Args: " <> T.unpack (pprFun (ppr tyConArgList))
 
 -- | Convert a 'Type' to a 'FgType'. Only 'TyConApp' is supported currently.
 toFgType :: (SDoc -> T.Text) -> Type -> Maybe (FgType TyCon)
