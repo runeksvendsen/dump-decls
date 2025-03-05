@@ -146,14 +146,16 @@ getDefinitions pprFun pkg_nm = do
   forM_ mDefinitions $ \defs -> do
     let blah = concat $ map (ppFunctionMap pprFun) (Map.elems defs)
     void $ liftIO $ mapM (TIO.hPutStrLn IO.stderr) blah
+  let f :: Map ModuleName FunctionMap -> Map ModuleName (Map Name (Json.FunctionType Type))
+      f = fmap $ (Map.mapMaybe $ either Just (const Nothing))
   pure $ DeclarationMap unit_id <$> Nothing
+  --
 
 ppFunctionMap
   :: (SDoc -> T.Text)
   -> FunctionMap
   -> [T.Text]
-ppFunctionMap pprFun fm = catMaybes $ -- WIP: ignore non-forall functions for now -- WIP: ignore non-forall functions for now
-   -- WIP: ignore non-forall functions for now
+ppFunctionMap pprFun fm = catMaybes $ -- WIP: ignore non-forall functions for now
   Map.toList fm <&> \(name, fun) ->
     either (const Nothing) (ppTodo name) fun
   where
@@ -261,6 +263,7 @@ reportModuleDecls pprFun unit_id modl_nm = do
             ]
     pure $ Map.fromList contents
 
+-- TODO: postpone conversion of GHC 'Type' to 'FgType'? Or just use 'funtionTypeExpandAndConvertToFgType' in here?
 parseType
   :: (SDoc -> T.Text)
   -> UnitId
@@ -354,11 +357,11 @@ declarationMapToJson
   -> Json.DeclarationMapJson T.Text
 declarationMapToJson pprFun dm =
   let
-    eitherMap :: Map T.Text (Map T.Text (Either TyConParseError (Json.TypeInfo (FgType (FgTyCon T.Text)))))
+    eitherMap :: Map T.Text (Map T.Text (Either TyConParseError (Json.FunctionType (FgType (FgTyCon T.Text)))))
     eitherMap = mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
       ( fullyQualify' modName
       , mapMapMaybe nameMap $ \(name, functionType) ->
-          (noQualify' name, funtionTypeToTypeInfo (modName, name) functionType)
+          (noQualify' name, funtionTypeExpandAndConvertToFgType (modName, name) functionType)
       )
 
   in Json.DeclarationMapJson
@@ -385,18 +388,13 @@ declarationMapToJson pprFun dm =
     mapMapMaybe :: Ord k' => Map k a -> ((k, a) -> (k', Maybe a')) -> Map k' a'
     mapMapMaybe map' f = Map.fromList . map (fmap fromJust) . filter (isJust . snd) . map f . Map.toList $ map'
 
-    funtionTypeToTypeInfo
+    funtionTypeExpandAndConvertToFgType
       :: (ModuleName, Name) -- for debugging purposes
       -> Json.FunctionType Type
-      -> Maybe (Either TyConParseError (Json.TypeInfo (FgType (FgTyCon T.Text))))
-    funtionTypeToTypeInfo dbg funType = do
+      -> Maybe (Either TyConParseError (Json.FunctionType (FgType (FgTyCon T.Text))))
+    funtionTypeExpandAndConvertToFgType dbg funType = do
       funTyExpanded <- traverse (toFgType pprFun . expandTypeSynonyms) funType
-      funTy <- traverse (toFgType pprFun) funType
-      let funTypeInfo = Json.TypeInfo
-            { Json.typeInfo_expanded = if funTyExpanded == funTy then Nothing else Just funTyExpanded
-            , Json.typeInfo_unexpanded = funTy
-            }
-      pure $ traverse (traverse (tyConToFgTyCon pprFun package dbg)) funTypeInfo
+      pure $ traverse (traverse (tyConToFgTyCon pprFun package dbg)) funTyExpanded
 
     fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . fullyQualify

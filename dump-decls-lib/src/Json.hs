@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -7,7 +6,6 @@
 {-# LANGUAGE TupleSections #-}
 module Json
 ( FunctionType(..)
-, TypeInfo(..)
 , ModuleDeclarations(..), fmapModuleDeclarations, explodeModuleDeclarations
 , DeclarationMapJson(..), fmapDeclarationMapJson
   -- * Util
@@ -54,25 +52,8 @@ instance Traversable FunctionType where
   traverse f ft =
     FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
 
-data TypeInfo tycon = TypeInfo
-  { typeInfo_expanded :: Maybe (FunctionType tycon)
-    -- ^ Does not contain type synonyms. 'Nothing' if there are no type synonyms in 'typeInfo_unexpanded'.
-  , typeInfo_unexpanded :: FunctionType tycon
-    -- ^ Potentially contains type synonyms
-  } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
-
-instance (A.ToJSON tycon) => A.ToJSON (TypeInfo tycon)
-instance (A.FromJSON tycon) => A.FromJSON (TypeInfo tycon)
-instance (NFData tycon) => NFData (TypeInfo tycon)
-
-instance Traversable TypeInfo where
-  traverse f ti =
-    TypeInfo
-      <$> traverse (traverse f) (typeInfo_expanded ti)
-      <*> traverse f (typeInfo_unexpanded ti)
-
 data ModuleDeclarations value = ModuleDeclarations
-  { moduleDeclarations_map :: Map value (Map value (TypeInfo (FgType (FgTyCon value))))
+  { moduleDeclarations_map :: Map value (Map value (FunctionType (FgType (FgTyCon value))))
     -- ^ Map from module name to a map of unqualified function names to 'TypeInfo'
   , moduleDeclarations_mapFail :: Map value (Map value TyConParseError)
     -- ^ Declarations for which an error occurred converting a 'GHC.Core.TyCon.TyCon' into a 'FgTyCon'.
@@ -94,7 +75,7 @@ fmapModuleDeclarations f (ModuleDeclarations map' mapFail) = ModuleDeclarations
 
 explodeModuleDeclarations
   :: ModuleDeclarations value
-  -> [(value, (value, TypeInfo (FgType (FgTyCon value))))]
+  -> [(value, (value, FunctionType (FgType (FgTyCon value))))]
 explodeModuleDeclarations =
   concatMap (\(value, lst) -> map (value,) lst)
     . Map.toList
