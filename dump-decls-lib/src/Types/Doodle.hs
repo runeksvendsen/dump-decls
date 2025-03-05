@@ -6,10 +6,11 @@
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
 {-# HLINT ignore "Use <$>" #-}
 {-# LANGUAGE TypeOperators #-}
+{-# HLINT ignore "Use first" #-}
 module Types.Doodle
 ( FunctionTypeForall(..)
+, specializeType
 )
-
 where
 
 import Types
@@ -19,6 +20,8 @@ import qualified Data.Text as T
 import Data.Foldable (foldl')
 import qualified Data.Map as Map
 import Control.Monad (foldM)
+import Data.Bifunctor (first)
+import Data.Functor ((<&>))
 
 type FunctionTypeNoTyVar =
   FunctionType (FgType (FgTyCon T.Text))
@@ -76,7 +79,16 @@ extendFrom =
 -- >>> let withoutTyVars = FgType_TyConApp "Map" [FgType_TyConApp "Bool" [], FgType_TyConApp "Int" []]
 -- >>> specializeType withTyVars withoutTyVars
 -- Right (Just (FgType_TyConApp "Map" [FgType_TyConApp "Bool" [],FgType_TyConApp "Int" []],fromList [("a",FgType_TyConApp "Bool" []),("b",FgType_TyConApp "Int" []),("f",FgType_TyConApp "Map" [])]))
-
+--
+-- >>> specializeType (FgType_Tuple Boxed 2 [FgType_TyConApp (Right "int") [], FgType_TyConApp (Right "bool") []]) (FgType_Tuple Boxed 2 [FgType_TyConApp (Left "Int") [], FgType_TyConApp (Left "Bool") []])
+-- Right (Just (FgType_Tuple Boxed 2 [FgType_TyConApp (Left "Int") [],FgType_TyConApp (Left "Bool") []],fromList [("bool",FgType_TyConApp (Left "Bool") []),("int",FgType_TyConApp (Left "Int") [])]))
+--
+-- NOTE: Implementaion strategy:
+--    1. Prefer many small, specific matches over few generic matches,
+--       e.g. separately match on `Right tyVar` and `Left tyCon`.
+--       If this leads to code duplication then factor out common code into a helper function.
+--    2. No wildcard matches. Match constructors only until no warnings are left.
+--       Helps to ensure that no relevant case has been overlooked.
 specializeType
   :: forall tyCon tyVar.
      ( Eq tyCon
@@ -102,38 +114,112 @@ specializeType =
        -> _
        -> Either String (Maybe (FgType tyCon, Map tyVar (FgType tyCon)))
     go env poly mono =
-      let handleTyConWithArgs' = handleTyConWithArgs (poly, mono) env
+      let handleTyConArgs' = handleTyConArgs (poly, mono)
       in case (poly, mono) of
-        (FgType_TyConApp pTyCon pArgs, FgType_TyConApp mTyCon mArgs) -> -- (Map k v) (Map Bool Int)
-          handleTyConWithArgs' (pTyCon, pArgs) (mTyCon, mArgs)
+        (FgType_TyConApp (Left pTyCon) pArgs, FgType_TyConApp mTyCon mArgs) | pTyCon == mTyCon -> do -- (Either a b, Either Int Bool)
+          mResult <- handleTyConArgs' env pArgs mArgs
+          pure $ first (FgType_TyConApp mTyCon) <$> mResult
 
-        (FgType_TyConApp _ _, _) ->
+        (FgType_TyConApp (Left _) _, FgType_TyConApp _ _) -> -- (Map a b, Either Int Bool)
+          Right Nothing -- NOTE: pTyCon /= mTyCon
+
+        (FgType_TyConApp (Right tyVar) pArgs, FgType_TyConApp mTyCon mArgs) ->
+          let mTyCon' =
+                let mTyConFgType = FgType_TyConApp mTyCon []
+                in case Map.lookup tyVar env of
+                  Just existingTypeEq ->
+                    if existingTypeEq == mTyConFgType
+                      then Just (mTyCon, env) -- previously instantiated to the same type. NOTE: unless `mArgs == []` this is a type variable _NOT_ of kind *
+                      else Nothing -- this type variable was previously instantiated to something else
+                  Nothing ->
+                    Just (mTyCon, Map.insert tyVar mTyConFgType env)
+          in case mTyCon' of
+              Just (tyCon', env') -> do
+                fmap (first (FgType_TyConApp tyCon')) <$> handleTyConArgs' env' pArgs mArgs
+              Nothing -> Right Nothing
+
+        (FgType_TyConApp (Right tyVar) [], ty@(FgType_List _)) -> -- f [] ; a [Int] ; a [b]
+          Right $ Just (ty, Map.insert tyVar ty env)
+
+        (FgType_TyConApp (Right tyVar) [tyVarArg], FgType_List (Just lstArg)) -> -- (f a, [Int]) ; (f a, [[Int]])
+          let env' = Map.insert tyVar (FgType_List Nothing) env -- f ~ []
+          in do
+            mResult <- go env' tyVarArg lstArg
+            pure $ mResult <&> \(resultArg, env'') -> (FgType_List (Just resultArg), env'')
+
+        (FgType_TyConApp (Right _) (_:_:_), FgType_List _) -> -- (f a b [...], []) ; (f a b [...], [Int])
           Right Nothing
 
-        (FgType_List _, FgType_List _) -> -- [a] [Bool]
-          undefined
+        (FgType_TyConApp (Right _) [_], FgType_List Nothing) -> -- (f a, [])
+          Right Nothing
+
+        (FgType_TyConApp (Right tyVar) [], fgTuple@(FgType_Tuple{})) -> -- (a, (Int, Bool)) ; (f, (,)) ; (f, (,) Bool)
+          Right $ Just (fgTuple, Map.insert tyVar fgTuple env)
+
+        (FgType_TyConApp (Right tyVar) pArgs, FgType_Tuple boxity size args) | length pArgs == length args -> do -- (f a, (,) Bool) ; f a a, (,) Bool Bool) ; (f a b c, (,) Int Bool String)
+          let env' = Map.insert tyVar (FgType_Tuple boxity size []) env
+          mRes <- handleTyConArgs' env' pArgs args
+          pure $ mRes <&> \(result, env'') ->
+            (FgType_Tuple boxity size result, env'')
+
+        (FgType_TyConApp (Right _) _, FgType_Tuple{}) -> -- (f a, (,) Bool Int) ; (f a b, (,) Bool)
+          Right Nothing -- NOTE: length pArgs /= length args
+
+        (FgType_TyConApp (Right tyVar) [], fgUnit@FgType_Unit{}) -> -- a ()
+          Right $ Just (fgUnit, Map.insert tyVar fgUnit env)
+
+        (FgType_TyConApp (Right _) _, FgType_Unit{}) -> -- (f a, ())
+          Right Nothing
+
+        (FgType_TyConApp (Left _) _, FgType_List{}) ->
+          Right Nothing
+        (FgType_TyConApp (Left _) _, FgType_Tuple{}) ->
+          Right Nothing
+        (FgType_TyConApp (Left _) _, FgType_Unit{}) ->
+          Right Nothing
+
+        (FgType_List (Just fgType), FgType_List (Just fgType')) -> do -- [a] [Bool]
+          mResult <- go env fgType fgType'
+          pure $ mResult <&> \(result, env') ->
+            (FgType_List (Just result), env')
 
         (FgType_List _, _) ->
           Right Nothing
 
-        (FgType_Tuple _ _ _, FgType_Tuple _ _ _) -> -- (a, b) (a, Bool)
-          undefined
-
-        (FgType_Tuple _ _ _, _) ->
+        (FgType_Tuple boxity size args, FgType_Tuple boxity' size' args') | boxity == boxity' && size == size' -> do -- (a, b) (Int, Bool)
+          mArgsEnv <- handleTyConArgs' env args args'
+          pure $ mArgsEnv <&> first (FgType_Tuple boxity size)
+        (FgType_Tuple{}, FgType_Tuple{}) -> -- boxity /= boxity' || size /= size'
           Right Nothing
 
-        (FgType_Unit _, _) ->
+        (FgType_Tuple _ _ _, FgType_TyConApp _ _) ->
+          Right Nothing
+        (FgType_Tuple _ _ _, FgType_List _) ->
+          Right Nothing
+        (FgType_Tuple _ _ _, FgType_Unit _) ->
           Right Nothing
 
-    handleTyConWithArgs
+        (FgType_Unit b, fgUnit@(FgType_Unit b')) | b == b' ->
+          Right $ Just (fgUnit, env)
+
+        (FgType_Unit{}, FgType_Unit{}) -> -- boxity mismatch
+          Right Nothing
+        (FgType_Unit _, FgType_TyConApp{}) ->
+          Right Nothing
+        (FgType_Unit _, FgType_List{}) ->
+          Right Nothing
+        (FgType_Unit _, FgType_Tuple{}) ->
+          Right Nothing
+
+    handleTyConArgs
       :: forall env.
          env ~ Map tyVar (FgType tyCon)
       => (FgType (Either tyCon tyVar), FgType tyCon) -- For debug printing
       -> env
-      -> (Either tyCon tyVar, [FgType (Either tyCon tyVar)]) -- polymorphic (TyCon, TyCon args)
-      -> (tyCon, [FgType tyCon]) -- monomorphic (TyCon, TyCon args)
-      -> Either String (Maybe (FgType tyCon, env))
-    handleTyConWithArgs dbg env_ (pTyCon, pArgs) (mTyCon, mArgs) =
+      -> [FgType (Either tyCon tyVar)] -- polymorphic TyCon args
+      -> [FgType tyCon] -- monomorphic TyCon args
+      -> Either String (Maybe ([FgType tyCon], env))
+    handleTyConArgs dbg env_ pArgs mArgs =
       let matchTyConArg
             :: Maybe ([FgType tyCon], env)
             -> (FgType (Either tyCon tyVar), FgType tyCon)
@@ -147,29 +233,13 @@ specializeType =
             other -> pure other
 
           eTyConArgsResult env'
-            | length mArgs /= length pArgs =
+            | length mArgs /= length pArgs = -- WIP: do we handle this now?
                 Left $ "unsaturated type constructor. " <> show dbg
             | otherwise =
                 foldM matchTyConArg (Just ([], env')) (zip pArgs mArgs)
+      in do
+        mResultArgs <- eTyConArgsResult env_
+        Right $ do
+          (resultArgs, env'') <- mResultArgs
+          Just (reverse resultArgs, env'')
 
-          mTyCon'
-            | pTyCon == Left mTyCon =
-                Just (mTyCon, env_) -- both lhs and rhs are the same type constructor.
-            | Right tyVar <- pTyCon = -- lhs is tyvar
-                let blahType = FgType_TyConApp mTyCon [] -- WIP: name
-                in case Map.lookup tyVar env_ of
-                  Just existingTypeEq ->
-                    if existingTypeEq == blahType
-                      then Just (mTyCon, env_) -- previously instantiated to the same type. NOTE: unless `mArgs == []` this is a type variable _NOT_ of kind *
-                      else Nothing -- this type variable was previously instantiated to something else
-                  Nothing ->
-                    Just (mTyCon, Map.insert tyVar blahType env_)
-            | otherwise =
-                Nothing -- lhs and rhs are different type constructors
-      in case mTyCon' of
-        Just (tyCon', env') -> do
-          mResultArgs <- eTyConArgsResult env'
-          Right $ do
-            (resultArgs, env'') <- mResultArgs
-            Just (FgType_TyConApp tyCon' (reverse resultArgs), env'')
-        _ -> Right Nothing
