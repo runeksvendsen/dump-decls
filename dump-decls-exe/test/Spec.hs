@@ -15,7 +15,6 @@ import qualified Test.Hspec
 import Test.Hspec.Expectations.Pretty (shouldNotBe, shouldBe)
 import Data.Maybe (fromJust)
 import qualified Data.Map as Map
-import qualified Data.List.NonEmpty as NE
 
 main :: IO ()
 main = do
@@ -47,7 +46,7 @@ specPutStrLn =
     tiPutStrLn =
       Json.TypeInfo
         { Json.typeInfo_expanded = Just $ Json.FunctionType
-            { Json.functionType_arg = Types.FgType_List $ Types.FgType_TyConApp tyConChar [] -- [Char]
+            { Json.functionType_arg = Types.FgType_List $ Just $ Types.FgType_TyConApp tyConChar [] -- [Char]
             , Json.functionType_ret = tyConAppIOUnit
             }
         , Json.typeInfo_unexpanded = Json.FunctionType
@@ -70,7 +69,7 @@ specUnsnoc =
       { Json.functionType_arg = fgTypeText
       , Json.functionType_ret = Types.FgType_TyConApp
           tyConMaybe
-          [Types.FgType_Tuple Types.Boxed fgTypeText (NE.singleton fgTypeChar)]
+          [Types.FgType_Tuple Types.Boxed 2 [fgTypeText, fgTypeChar]]
       }
 
     tiUnsnoc =
