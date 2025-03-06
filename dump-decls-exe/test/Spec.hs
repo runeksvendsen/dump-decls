@@ -37,28 +37,26 @@ spec declarationMapJson =
 -- | System.IO.putStrLn :: String -> IO ()
 specPutStrLn :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
 specPutStrLn =
-    mkSpec "base" "System.IO" "putStrLn" tiPutStrLn
+    mkSpec "base" "System.IO" "putStrLn" ftPutStrLn
   where
     tyConIO = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
     tyConString = parsePprTyCon "base-4.18.0.0:GHC.Base.String"
     tyConAppIOUnit = Types.FgType_TyConApp tyConIO [Types.FgType_Unit Types.Boxed] -- IO ()
 
-    tiPutStrLn =
-      Json.TypeInfo
-        { Json.typeInfo_expanded = Just $ Json.FunctionType
+    ftPutStrLn = Json.FunctionType
             { Json.functionType_arg = Types.FgType_List $ Just $ Types.FgType_TyConApp tyConChar [] -- [Char]
             , Json.functionType_ret = tyConAppIOUnit
             }
-        , Json.typeInfo_unexpanded = Json.FunctionType
-            { Json.functionType_arg = Types.FgType_TyConApp tyConString [] -- String
-            , Json.functionType_ret = tyConAppIOUnit
-            }
-        }
+        -- , Json.typeInfo_unexpanded = Json.FunctionType
+        --     { Json.functionType_arg = Types.FgType_TyConApp tyConString [] -- String
+        --     , Json.functionType_ret = tyConAppIOUnit
+        --     }
+        -- }
 
 -- | Data.Text.unsnoc :: Text -> Maybe (Text, Char)
 specUnsnoc :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
 specUnsnoc =
-    mkSpec "text" "Data.Text" "unsnoc" tiUnsnoc
+    mkSpec "text" "Data.Text" "unsnoc" funtionType
   where
     tyConText = parsePprTyCon "text-2.0.2:Data.Text.Internal.Text"
     fgTypeText = Types.FgType_TyConApp tyConText []
@@ -72,17 +70,11 @@ specUnsnoc =
           [Types.FgType_Tuple Types.Boxed 2 [fgTypeText, fgTypeChar]]
       }
 
-    tiUnsnoc =
-      Json.TypeInfo
-        { Json.typeInfo_expanded = Nothing
-        , Json.typeInfo_unexpanded = funtionType
-        }
-
 mkSpec
   :: T.Text -- Package with version (e.g. @base-4.18.0.0@)
   -> T.Text -- Module name (e.g. @System.IO@)
   -> T.Text -- Definition name (e.g. @putStrLn@)
-  -> Json.TypeInfo (Types.FgType (Types.FgTyCon T.Text))
+  -> Json.FunctionType (Types.FgType (Types.FgTyCon T.Text))
   -> [Json.DeclarationMapJson T.Text]
   -> Test.Hspec.Spec
 mkSpec pkgName modName defnName expected declarationMapJson =
@@ -113,7 +105,7 @@ tyConChar = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.Char"
 newtype IgnorePackageVersion a = IgnorePackageVersion a
   deriving (Show)
 
-instance Eq (IgnorePackageVersion (Json.TypeInfo (Types.FgType (Types.FgTyCon T.Text)))) where
+instance Eq (IgnorePackageVersion (Json.FunctionType (Types.FgType (Types.FgTyCon T.Text)))) where
   IgnorePackageVersion ti1 == IgnorePackageVersion ti2 =
     let strikePkgVersionFgPackage pkg = pkg { Types.fgPackageVersion = "" }
 

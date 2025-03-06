@@ -26,7 +26,6 @@ module Types
 )
 where
 
-import qualified Data.List.NonEmpty as NE
 import qualified Data.Aeson as A
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
@@ -268,13 +267,13 @@ instance A.FromJSON Boxity where
 instance (A.ToJSON tycon) => A.ToJSON (FgType tycon) where
   toJSON = \case
     FgType_TyConApp tycon tyList -> A.object
-      [("type", A.object [("tycon" :: Compat.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
+      [("type", A.object [("tycon" :: Compat.Key, A.toJSON tycon), ("args", A.toJSON tyList)])]
     FgType_List bty -> A.object
       [("list", A.toJSON bty)]
     FgType_Tuple boxity size args -> -- WIP: size
       let key = case boxity of {Unboxed -> "tuple#"; Boxed -> "tuple"}
       in A.object
-        [(key, A.toJSON args)]
+        [(key, A.object [("args", A.toJSON args), ("size", A.toJSON size)])]
     FgType_Unit b -> A.String $ "unit" <> if b == Unboxed then "#" else ""
 
 instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
@@ -285,10 +284,10 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
     val -> failParse val
     where
       parseObject o = do
-            parseKind o "type" (\o' ->  FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args")
+            parseKind o "type" (\o' -> FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "args")
         <|> parseKind o "list" (pure . FgType_List)
-        <|> parseKind o "tuple" (tupleFromList Boxed)
-        <|> parseKind o "tuple#" (tupleFromList Unboxed)
+        <|> parseKind o "tuple" (tupleFromObject Boxed)
+        <|> parseKind o "tuple#" (tupleFromObject Unboxed)
         <|> failParse (A.Object o)
 
       failParse val = fail $ unwords
@@ -312,9 +311,14 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
       parseKind o keyTxt mkType =
         maybe empty (A.parseJSON >=> mkType) (Compat.lookup keyTxt o)
 
-      tupleFromList boxity = \case
+      tupleFromObject boxity o = do
+        size <- o A..: "size"
+        args <- o A..: "args"
+        tupleFromArgList size boxity args
+
+      tupleFromArgList size boxity = \case
         args@(_:_:_) ->
-          pure $ FgType_Tuple boxity (error "WIP: size") args
+          pure $ FgType_Tuple boxity size args
         other ->
           fail $ "Tuple size must be >= 2 but size is: " <> show (length other)
 
