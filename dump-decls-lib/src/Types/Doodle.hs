@@ -8,8 +8,10 @@
 {-# LANGUAGE TypeOperators #-}
 {-# HLINT ignore "Use first" #-}
 module Types.Doodle
-( FunctionTypeForall(..)
+( FunctionTypeForallSpecialized(..)
+, FunctionTypeForall
 , specializeType
+, mkFunctionTypeForall
 )
 where
 
@@ -17,7 +19,6 @@ import Types
 import Types.Forall
 import Json
 import qualified Data.Text as T
-import Data.Foldable (foldl')
 import qualified Data.Map as Map
 import Control.Monad (foldM)
 import Data.Bifunctor (first)
@@ -26,11 +27,33 @@ import Data.Functor ((<&>))
 type FunctionTypeNoTyVar =
   FunctionType (FgType (FgTyCon T.Text))
 
-data FunctionTypeForall tyVar text = FunctionTypeForall
-  { ftf_forall :: Forall tyVar
+type FunctionTypeForall tyVar text = FunctionTypeForallSpecialized tyVar () text
+
+mkFunctionTypeForall
+  :: ForallSpecialized tyVar tyVarAssoc
+  -> FgType (Either (FgTyCon text) (TyVar tyVar))
+  -> FgType (Either (FgTyCon text) (TyVar tyVar))
+  -> FunctionTypeForallSpecialized tyVar tyVarAssoc text
+mkFunctionTypeForall = FunctionTypeForallSpecialized
+
+data FunctionTypeForallSpecialized tyVar tyVarAssoc text = FunctionTypeForallSpecialized
+  { ftf_forall :: ForallSpecialized tyVar tyVarAssoc
   , ftf_arg :: FgType (Either (FgTyCon text) (TyVar tyVar))
   , ftf_ret :: FgType (Either (FgTyCon text) (TyVar tyVar))
   }
+
+-- WIP: name?
+specializationEnvToFunctionTypeForall
+  :: Map tyVar (FgType tyCon)
+  -> FunctionTypeForallSpecialized tyVar tyVarAssoc text
+specializationEnvToFunctionTypeForall =
+  undefined
+
+functionTypeForallToSpecializedFgType
+  :: FunctionTypeForallSpecialized tyVar (FgType tyCon) text
+  -> FgType tyCon
+functionTypeForallToSpecializedFgType =
+  undefined
 
 -- |
 extendFrom

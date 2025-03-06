@@ -14,6 +14,7 @@ library
                     , containers
                     , aeson
                     , unordered-containers
+                    , ordered-containers
                     , text
                     , bytestring
                     , deepseq

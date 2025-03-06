@@ -308,7 +308,7 @@ parseType pprFun package dbg tyInit =
                         in if ftfTxt /= ftfTxtGhc
                           then T.unpack ("DIFF: " <> nameTxt <> "\n      " <> ftfTxt <> "\n      " <> ftfTxtGhc <> "\n") `trace` ftf
                           else ftf
-                  pure $ (if doDebugPrintDiff then debugPrintDiff else id) $ FunctionTypeForall forall_ arg'' res''
+                  pure $ (if doDebugPrintDiff then debugPrintDiff else id) $ mkFunctionTypeForall forall_ arg'' res''
             pure $
               either
               throwError -- WIP: don't throw exception
