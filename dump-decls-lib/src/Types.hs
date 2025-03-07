@@ -7,12 +7,13 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE InstanceSigs #-}
 -- |
 -- TODO: Test 'Data.Aeson.encode
 -- TODO: Merge "Types" and "JSON"?
 module Types
 ( -- * 'FgType'
-  FgType(..), renderFgType, renderFgTypeGeneric
+  FgType(..), renderFgType, renderFgTypeGeneric, joinFgType
 , Boxity(..)
 , isBoxed
   -- * 'FgTyCon'
@@ -237,6 +238,35 @@ instance Traversable FgType where
       FgType_Tuple boxity size <$> traverse (traverse f) lst
     FgType_Unit b ->
       pure $ FgType_Unit b
+
+-- | Turn e.g. @(Either String) Int@ into @Either String Int@ (which are equivalent).
+--
+--   Similar to 'Control.Monad.join' hence the name.
+--
+--   Example:
+--
+-- >>> let nestedFgType = FgType_TyConApp (FgType_TyConApp "Either" [FgType_TyConApp "String" []]) [FgType_TyConApp (FgType_TyConApp "Int" []) []]
+-- >>> renderFgType (\fgType -> "(" <> renderFgType T.pack fgType <> ")") nestedFgType
+-- >>> renderFgType T.pack $ joinFgType nestedFgType
+-- "(Either String) (Int)"
+-- "Either Int String"
+joinFgType
+  :: FgType (FgType tyCon)
+  -> FgType tyCon
+joinFgType =
+  go
+  where
+    go = \case
+      FgType_TyConApp fgType args ->
+        case fgType of
+          FgType_TyConApp tyCon args' ->
+            FgType_TyConApp tyCon (map go args ++ args')
+          other -> other
+      FgType_List mFgType -> FgType_List $ go <$> mFgType
+      FgType_Tuple boxity size lst ->
+        FgType_Tuple boxity size $ go <$> lst
+      FgType_Unit b ->
+        FgType_Unit b
 
 -- | A /boxed/ value is one that's represented by a pointer to the actual data representing the value.
 --   An /unboxed/ value is represented by the actual data (no pointer).

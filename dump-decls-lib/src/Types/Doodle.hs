@@ -7,6 +7,7 @@
 {-# HLINT ignore "Use <$>" #-}
 {-# LANGUAGE TypeOperators #-}
 {-# HLINT ignore "Use first" #-}
+{-# LANGUAGE LambdaCase #-}
 module Types.Doodle
 ( FunctionTypeForallSpecialized(..)
 , FunctionTypeForall
@@ -23,6 +24,8 @@ import qualified Data.Map as Map
 import Control.Monad (foldM)
 import Data.Bifunctor (first)
 import Data.Functor ((<&>))
+import Data.Foldable (foldl')
+import Data.Maybe (fromMaybe)
 
 type FunctionTypeNoTyVar =
   FunctionType (FgType (FgTyCon T.Text))
@@ -43,25 +46,40 @@ data FunctionTypeForallSpecialized tyVar tyVarAssoc text = FunctionTypeForallSpe
   }
 
 -- WIP: name?
-specializationEnvToFunctionTypeForall
-  :: Map tyVar (FgType tyCon)
-  -> FunctionTypeForallSpecialized tyVar tyVarAssoc text
-specializationEnvToFunctionTypeForall =
-  undefined
+specializationEnvToForallSpecialized
+  :: Map (TyVar tyVar) (FgType tyCon)
+  -> ForallSpecialized tyVar ()
+  -> Maybe (ForallSpecialized tyVar (FgType tyCon)) -- Nothing: not all type variables specialized ()
+specializationEnvToForallSpecialized env forallSpecialized =
+  error "WIP"
 
 functionTypeForallToSpecializedFgType
-  :: FunctionTypeForallSpecialized tyVar (FgType tyCon) text
-  -> FgType tyCon
-functionTypeForallToSpecializedFgType =
-  undefined
+  :: ForallSpecialized (TyVar tyVar) (FgType (FgTyCon T.Text))
+  -> FgType (Either (FgTyCon T.Text) (TyVar tyVar))
+  -> Either (ForallError (TyVar tyVar)) (FgType (FgTyCon T.Text)) -- WIP: accumulate _all_ ForallErrors
+functionTypeForallToSpecializedFgType forallSpecialized fgTypePoly = joinFgType <$>
+  traverse
+    (\eitherFgTyConOrTyVar ->
+        either
+          (\tyCon -> Right $ FgType_TyConApp tyCon [])
+          (\tyVar -> do
+              (_, blah) <- lookupTyVarAssoc tyVar forallSpecialized
+              Right blah
+          )
+          eitherFgTyConOrTyVar
+    )
+    fgTypePoly
 
--- |
+-- | Extend from the return type of the monomorphic function
+--
+-- NOTE: quadratic!
 extendFrom
-  :: [FunctionTypeNoTyVar]
+  :: (Ord tyVar, Show tyVar)
+  => [FunctionTypeNoTyVar]
       -- ^ monomorphic functions.
       --
       --   e.g. @Int -> [Bool]@
-  -> [FunctionTypeForall tyVar text]
+  -> [FunctionTypeForall tyVar T.Text]
       -- ^ polymorphic functions
       --
       --   e.g. @forall a. [a] -> Maybe a@
@@ -70,8 +88,33 @@ extendFrom
       --    that takes as argument a type retuned by one of the monomorphic functions
       --
       --  e.g. @[Bool] -> Maybe Bool@
-extendFrom =
-  undefined
+extendFrom monoFuns polyFuns =
+  concat $ foldl' foldFun [] monoFuns
+  where
+    foldFun
+      :: [[FunctionTypeNoTyVar]]
+      -> FunctionTypeNoTyVar
+      -> [[FunctionTypeNoTyVar]]
+    foldFun accum monoFun =
+      let foldFun' accum' polyFun =
+            case specializeType (ftf_arg polyFun) (functionType_ret monoFun) of
+              Right (Just (fgTypePolyArg, env)) ->
+                let mForallSpecialized =
+                      specializationEnvToForallSpecialized env (ftf_forall polyFun)
+                    forallSpecialized = fromMaybe (error $ "WIP: not all type variables specialized in " <> show (env, ftf_forall polyFun)) $
+                      mForallSpecialized
+                    eFgTypePolyRet =
+                      functionTypeForallToSpecializedFgType forallSpecialized (ftf_ret polyFun)
+                    fgTypePolyRet =
+                      either (error . (<> show (forallSpecialized, ftf_ret polyFun)) . show) id eFgTypePolyRet -- WIP
+                in FunctionType
+                  { functionType_arg = fgTypePolyArg
+                  , functionType_ret = fgTypePolyRet
+                  } : accum'
+              Left e ->
+                error e : accum' -- WIP
+              _ -> accum'
+      in foldl' foldFun' [] polyFuns : accum
 
 -- | TODO
 --
@@ -256,8 +299,8 @@ specializeType =
             other -> pure other
 
           eTyConArgsResult env'
-            | length mArgs /= length pArgs = -- WIP: do we handle this now?
-                Left $ "unsaturated type constructor. " <> show dbg
+            | length mArgs /= length pArgs =
+                Right Nothing
             | otherwise =
                 foldM matchTyConArg (Just ([], env')) (zip pArgs mArgs)
       in do

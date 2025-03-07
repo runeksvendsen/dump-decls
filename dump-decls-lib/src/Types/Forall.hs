@@ -1,4 +1,6 @@
 {-# LANGUAGE RankNTypes #-} -- TODO: remove
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
 module Types.Forall
 ( -- * Types
   Forall
@@ -6,9 +8,9 @@ module Types.Forall
 , TyVar
   -- * Operations
 , singleton, appendTyVar, renderForall
-, getTyVar, lookupTyVar
+, getTyVar, lookupTyVar, lookupTyVarAssoc
   -- * Errors
-, ForallError(..)
+, ForallError(..), mapWithKey
 )
 where
 import qualified Data.List.NonEmpty as NE
@@ -32,7 +34,15 @@ toOrderedList = map fst . OMap.assocs
 type Forall tyVar = ForallSpecialized tyVar ()
 
 newtype ForallSpecialized tyVar assoc = ForallSpecialized (OrdMap tyVar assoc)
-  deriving (Eq, Show, Ord)
+  deriving (Eq, Show, Ord, Functor, Foldable)
+
+mapWithKey
+  :: Ord tyVar
+  => (TyVar tyVar -> assoc -> assoc')
+  -> ForallSpecialized tyVar assoc
+  -> ForallSpecialized tyVar assoc'
+mapWithKey f (ForallSpecialized ordMap) =
+  ForallSpecialized $ OMap.fromList $ map (\(k, v) -> (k, f (TyVar k) v)) $ OMap.assocs ordMap
 
 renderForall
   :: (tyVar -> T.Text)
@@ -75,10 +85,18 @@ lookupTyVar
   => tyVar
   -> Forall tyVar
   -> Either (ForallError tyVar) (TyVar tyVar)
-lookupTyVar tyVar (ForallSpecialized ordMap) =
+lookupTyVar tyVar  =
+  fmap fst . lookupTyVarAssoc tyVar
+
+lookupTyVarAssoc
+  :: (Ord tyVar)
+  => tyVar
+  -> ForallSpecialized tyVar assoc
+  -> Either (ForallError tyVar) (TyVar tyVar, assoc)
+lookupTyVarAssoc tyVar (ForallSpecialized ordMap) =
   maybe
     (Left $ NoSuchTypeVar (NE.fromList $ toOrderedList ordMap) tyVar) -- WIP
-    (const $ Right $ TyVar tyVar)
+    (\assoc -> Right (TyVar tyVar, assoc))
     (OMap.lookup tyVar ordMap)
 
 data ForallError tyVar
