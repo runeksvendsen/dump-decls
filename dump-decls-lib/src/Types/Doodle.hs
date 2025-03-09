@@ -13,11 +13,13 @@ module Types.Doodle
 , FunctionTypeForall
 , specializeType
 , mkFunctionTypeForall
+, extendFrom
 )
 where
 
 import Types
 import Types.Forall
+import qualified Types.Forall as Forall
 import Json
 import qualified Data.Text as T
 import qualified Data.Map as Map
@@ -25,7 +27,7 @@ import Control.Monad (foldM)
 import Data.Bifunctor (first)
 import Data.Functor ((<&>))
 import Data.Foldable (foldl')
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, fromJust)
 
 type FunctionTypeNoTyVar =
   FunctionType (FgType (FgTyCon T.Text))
@@ -45,34 +47,38 @@ data FunctionTypeForallSpecialized tyVar tyVarAssoc text = FunctionTypeForallSpe
   , ftf_ret :: FgType (Either (FgTyCon text) (TyVar tyVar))
   }
 
--- WIP: name?
+-- WIP: something more type safe than this conversion
 specializationEnvToForallSpecialized
-  :: Map (TyVar tyVar) (FgType tyCon)
+  :: Ord tyVar
+  => Map (TyVar tyVar) (FgType tyCon)
   -> ForallSpecialized tyVar ()
   -> Maybe (ForallSpecialized tyVar (FgType tyCon)) -- Nothing: not all type variables specialized ()
 specializationEnvToForallSpecialized env forallSpecialized =
-  error "WIP"
+  const (fromJust <$> forallMaybeValue) <$> theMaybe
+  where
+    theMaybe = sequence_ $ Forall.elems forallMaybeValue
+    forallMaybeValue = mapWithKey f forallSpecialized
+    f tyVar () = Map.lookup tyVar env
 
 functionTypeForallToSpecializedFgType
-  :: ForallSpecialized (TyVar tyVar) (FgType (FgTyCon T.Text))
+  :: (Ord tyVar, Show tyVar)
+  => ForallSpecialized tyVar (FgType (FgTyCon T.Text))
   -> FgType (Either (FgTyCon T.Text) (TyVar tyVar))
   -> Either (ForallError (TyVar tyVar)) (FgType (FgTyCon T.Text)) -- WIP: accumulate _all_ ForallErrors
-functionTypeForallToSpecializedFgType forallSpecialized fgTypePoly = joinFgType <$>
+functionTypeForallToSpecializedFgType forallSpecialized fgTypePoly =
+  joinFgType <$>
   traverse
     (\eitherFgTyConOrTyVar ->
         either
           (\tyCon -> Right $ FgType_TyConApp tyCon [])
-          (\tyVar -> do
-              (_, blah) <- lookupTyVarAssoc tyVar forallSpecialized
-              Right blah
-          )
+          (\tyVar -> Right $ snd $ lookupTyVarAssoc tyVar forallSpecialized)
           eitherFgTyConOrTyVar
     )
     fgTypePoly
 
 -- | Extend from the return type of the monomorphic function
 --
--- NOTE: quadratic!
+-- NOTE: quadratic!!!
 extendFrom
   :: (Ord tyVar, Show tyVar)
   => [FunctionTypeNoTyVar]
@@ -84,7 +90,7 @@ extendFrom
       --
       --   e.g. @forall a. [a] -> Maybe a@
   -> [FunctionTypeNoTyVar]
-      -- ^ a list of: a specialization of a polymorphic function
+      -- ^ a list of: a specialization of one of the polymorphic functions
       --    that takes as argument a type retuned by one of the monomorphic functions
       --
       --  e.g. @[Bool] -> Maybe Bool@
