@@ -7,10 +7,6 @@ author:             Ben Gamari
 maintainer:         ben@smart-cactus.org
 copyright:          (c) 2023 Ben Gamari
 
-extra-source-files:
-    bench/data/all-v3.json
-    bench/data/all-v4.json
-
 library
     exposed-modules:  Json
                     , Json.Migrate
@@ -58,19 +54,3 @@ test-suite unit
     , dump-decls-lib
     , hspec
   default-language: Haskell2010
-
--- TODO: get Nix to include benchmark in bin/ folder
-executable benchmark-lib
-  main-is: Main.hs
-  hs-source-dirs: bench/
-  build-depends:
-      base
-    , dump-decls-lib
-    , aeson
-    , text
-    , bytestring
-    , criterion
-    , file-embed
-  default-language: Haskell2010
-  ghc-options: -threaded
-               -O2
