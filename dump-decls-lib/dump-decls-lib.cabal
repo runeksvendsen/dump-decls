@@ -10,9 +10,9 @@ copyright:          (c) 2023 Ben Gamari
 library
     exposed-modules:  Json
                     , Json.Migrate
+                    , Json.Version1
+                    , Json.Version2
                     , Json.Version3
-                    , Json.Version4
-                    , Json.Version5
                     , Types
                     , Compat
                     , Compat.Aeson

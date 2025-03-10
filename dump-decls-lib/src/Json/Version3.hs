@@ -62,13 +62,13 @@ instance (A.FromJSON value, Eq value) => A.FromJSON (ModuleDeclarations value) w
       (Map.fromAscList $ map (fmap Map.fromAscList) map')
       (Map.fromAscList $ map (fmap Map.fromAscList) mapFail)
 
-instance A.ToJSON (Versioned.Versioned 5 [DeclarationMapJson T.Text]) where
+instance A.ToJSON (Versioned.Versioned 3 [DeclarationMapJson T.Text]) where
   toJSON =
     let toJSON' :: DeclarationMapJson T.Text -> A.Value
         toJSON' = $(A.mkToJSON A.defaultOptions ''DeclarationMapJson)
     in versionedToJSON (A.toJSON . map toJSON')
 
-instance A.FromJSON (Versioned.Versioned 5 [DeclarationMapJson T.Text]) where
+instance A.FromJSON (Versioned.Versioned 3 [DeclarationMapJson T.Text]) where
   parseJSON =
     let parseJSON' :: A.Value -> A.Parser (DeclarationMapJson T.Text)
         parseJSON' = $(A.mkParseJSON A.defaultOptions ''DeclarationMapJson)

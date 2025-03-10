@@ -1,9 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 module Json.Migrate
-( migrateV3ToV4
-, migrateV4ToV5
-, unversionedJsonFileToV3
+( migrateV1ToV2
+, migrateV2ToV3
+, unversionedJsonFileToV1
 )
 where
 
@@ -14,30 +14,30 @@ import Json.Version2 ()
 import Json.Version3 ()
 import qualified Data.Text as T
 
-migrateV3ToV4
+migrateV1ToV2
   :: FilePath -- old (v1)
   -> FilePath -- new (v2)
   -> IO [DeclarationMapJson T.Text]
-migrateV3ToV4 fpOld fpNew =
-  versionedJsonMigrateFile (Version :: Version 3, fpOld) (Version :: Version 4, fpNew) >>= \case
+migrateV1ToV2 fpOld fpNew =
+  versionedJsonMigrateFile (Version :: Version 1, fpOld) (Version :: Version 2, fpNew) >>= \case
     Left e -> fail $ "migrateV1ToV2: failed to parse old version: " <> e
     Right a -> pure a
 
-migrateV4ToV5
+migrateV2ToV3
   :: FilePath -- old (v2)
   -> FilePath -- new (v3)
   -> IO [DeclarationMapJson T.Text]
-migrateV4ToV5 fpOld fpNew =
-  versionedJsonMigrateFile (Version :: Version 4, fpOld) (Version :: Version 5, fpNew) >>= \case
-    Left e -> fail $ "migrateV4ToV5: failed to parse old version: " <> e
+migrateV2ToV3 fpOld fpNew =
+  versionedJsonMigrateFile (Version :: Version 2, fpOld) (Version :: Version 3, fpNew) >>= \case
+    Left e -> fail $ "migrateV2ToV3: failed to parse old version: " <> e
     Right a -> pure a
 
-unversionedJsonFileToV3
+unversionedJsonFileToV1
   :: FilePath -- unversioned
   -> FilePath -- v1
   -> IO [DeclarationMapJson T.Text]
-unversionedJsonFileToV3 fpOld fpNew =
-  unversionedJsonFileToVersioned fpOld (Version :: Version 3, fpNew) >>= \case
-    Left e -> fail $ "unversionedJsonFileToV3: failed to parse unversioned: " <> e
+unversionedJsonFileToV1 fpOld fpNew =
+  unversionedJsonFileToVersioned fpOld (Version :: Version 1, fpNew) >>= \case
+    Left e -> fail $ "unversionedJsonFileToV1: failed to parse unversioned: " <> e
     Right a -> pure a
 

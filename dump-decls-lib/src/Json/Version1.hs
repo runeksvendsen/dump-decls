@@ -36,18 +36,18 @@ instance (A.FromJSON a, A.FromJSONKey a, Ord a) => A.FromJSON (ModuleDeclaration
 instance A.ToJSON (DeclarationMapJson T.Text)
 instance A.FromJSON (DeclarationMapJson T.Text)
 
-instance A.ToJSON (Versioned.Versioned 3 (DeclarationMapJson T.Text)) where
+instance A.ToJSON (Versioned.Versioned 1 (DeclarationMapJson T.Text)) where
   toJSON = versionedToJSON (A.genericToJSON A.defaultOptions)
-instance A.FromJSON (Versioned.Versioned 3 (DeclarationMapJson T.Text)) where
+instance A.FromJSON (Versioned.Versioned 1 (DeclarationMapJson T.Text)) where
   parseJSON = versionedParseJSON (A.genericParseJSON A.defaultOptions)
 
-instance A.ToJSON (Versioned.Versioned 3 [DeclarationMapJson T.Text]) where
+instance A.ToJSON (Versioned.Versioned 1 [DeclarationMapJson T.Text]) where
   toJSON =
     let toJSON' :: DeclarationMapJson T.Text -> A.Value
         toJSON' = A.genericToJSON A.defaultOptions
     in versionedToJSON (A.toJSON . map toJSON')
 
-instance A.FromJSON (Versioned.Versioned 3 [DeclarationMapJson T.Text]) where
+instance A.FromJSON (Versioned.Versioned 1 [DeclarationMapJson T.Text]) where
   parseJSON =
     let parseJSON' :: A.Value -> A.Parser (DeclarationMapJson T.Text)
         parseJSON' = A.genericParseJSON A.defaultOptions

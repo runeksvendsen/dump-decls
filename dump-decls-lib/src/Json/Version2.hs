@@ -51,13 +51,13 @@ instance (A.ToJSON a, A.ToJSONKey a) => A.ToJSON (ModuleDeclarations a) where
 instance (A.FromJSON a, A.FromJSONKey a, Ord a) => A.FromJSON (ModuleDeclarations a) where
   parseJSON = $(A.mkParseJSON A.defaultOptions ''ModuleDeclarations)
 
-instance A.ToJSON (Versioned.Versioned 4 [DeclarationMapJson T.Text]) where
+instance A.ToJSON (Versioned.Versioned 2 [DeclarationMapJson T.Text]) where
   toJSON =
     let toJSON' :: DeclarationMapJson T.Text -> A.Value
         toJSON' = $(A.mkToJSON A.defaultOptions ''DeclarationMapJson)
     in versionedToJSON (A.toJSON . map toJSON')
 
-instance A.FromJSON (Versioned.Versioned 4 [DeclarationMapJson T.Text]) where
+instance A.FromJSON (Versioned.Versioned 2 [DeclarationMapJson T.Text]) where
   parseJSON =
     let parseJSON' :: A.Value -> A.Parser (DeclarationMapJson T.Text)
         parseJSON' = $(A.mkParseJSON A.defaultOptions ''DeclarationMapJson)
