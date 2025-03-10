@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-module Json.Version3
+module Json.Version1
 ( Versioned.Versioned
 , DeclarationMapJson
 )

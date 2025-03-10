@@ -3,7 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Json.Version4
+module Json.Version2
 (
 )
 where
