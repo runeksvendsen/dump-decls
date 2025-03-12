@@ -54,8 +54,6 @@ data FgTyCon text = FgTyCon
     -- ^ Package
   } deriving (Eq, Show, Ord, Generic, Functor)
 
-instance (A.ToJSON a) => A.ToJSON (FgTyCon a)
-instance (A.FromJSON a) => A.FromJSON (FgTyCon a)
 instance (NFData a) => NFData (FgTyCon a)
 
 -- | Render in the format /package_name-package_version:module_name.name/.
@@ -134,8 +132,6 @@ data FgPackage text = FgPackage
     -- ^ Package version, e.g. @2.0.2@
   } deriving (Eq, Show, Ord, Generic, Functor)
 
-instance (A.ToJSON a) => A.ToJSON (FgPackage a)
-instance (A.FromJSON a) => A.FromJSON (FgPackage a)
 instance (NFData a) => NFData (FgPackage a)
 
 -- | Inverse of 'parsePackageWithVersion'
@@ -161,8 +157,6 @@ data TyConParseError = TyConParseError
     -- ^ The source location of the 'GHC.Core.TyCon.TyCon'
   } deriving (Eq, Show, Ord, Generic)
 
-instance A.ToJSON TyConParseError
-instance A.FromJSON TyConParseError
 instance NFData TyConParseError
 
 -- | Render a 'TyConParseError' as a human-readable text string
