@@ -11,8 +11,6 @@ library
     exposed-modules:  Json
                     , Json.Migrate
                     , Json.Version1
-                    , Json.Version2
-                    , Json.Version3
                     , Types
                     , Compat
                     , Compat.Aeson
