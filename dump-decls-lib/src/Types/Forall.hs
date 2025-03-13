@@ -85,8 +85,8 @@ appendTyVar
   -> Either (ForallError tyVar) (Forall tyVar)
 appendTyVar tyVar (ForallSpecialized ordMap) =
   maybe
-    (Left $ DuplicateTypeVar (NE.fromList $ toOrderedList ordMap) tyVar) -- WIP
-    (const $ Right $ ForallSpecialized $ (tyVar, ()) <| ordMap)
+    (Right $ ForallSpecialized $ (tyVar, ()) <| ordMap)
+    (const $ Left $ DuplicateTypeVar (NE.fromList $ toOrderedList ordMap) tyVar) -- WIP
     (OMap.lookup tyVar ordMap)
 
 lookupTyVar
