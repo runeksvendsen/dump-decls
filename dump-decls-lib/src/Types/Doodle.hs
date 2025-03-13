@@ -7,7 +7,6 @@
 {-# HLINT ignore "Use <$>" #-}
 {-# LANGUAGE TypeOperators #-}
 {-# HLINT ignore "Use first" #-}
-{-# LANGUAGE LambdaCase #-}
 module Types.Doodle
 ( FunctionTypeForallSpecialized(..)
 , FunctionTypeForall
@@ -291,7 +290,7 @@ specializeType =
       -> [FgType (Either tyCon tyVar)] -- polymorphic TyCon args
       -> [FgType tyCon] -- monomorphic TyCon args
       -> Either String (Maybe ([FgType tyCon], env))
-    handleTyConArgs dbg env_ pArgs mArgs =
+    handleTyConArgs _ env_ pArgs mArgs =
       let matchTyConArg
             :: Maybe ([FgType tyCon], env)
             -> (FgType (Either tyCon tyVar), FgType tyCon)

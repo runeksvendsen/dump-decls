@@ -1,4 +1,3 @@
-{-# LANGUAGE RankNTypes #-} -- TODO: remove
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE OverloadedStrings #-}
