@@ -27,7 +27,7 @@ type OrdMap k v = OMap k v
 
 -- insertion order
 toOrderedList :: OrdMap tyVar assoc -> [tyVar]
-toOrderedList = map fst . OMap.assocs
+toOrderedList = reverse . map fst . OMap.assocs
 
 -- | Represents the @forall@-part of a type signature, which has the form
 --   @forall x1 x2 x3 [...] xn.@.
