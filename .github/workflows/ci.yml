@@ -18,7 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
       - run: nix-build ${{ matrix.package }}/${{ matrix.nix_file }}
       - name: Test run of 'dump-decls' executable
         if: ${{ matrix.package == 'dump-decls-exe' }}
