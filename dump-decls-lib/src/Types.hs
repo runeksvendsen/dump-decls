@@ -246,10 +246,10 @@ instance Traversable FgType where
 --   Example:
 --
 -- >>> let nestedFgType = FgType_TyConApp (FgType_TyConApp "Either" [FgType_TyConApp "String" []]) [FgType_TyConApp (FgType_TyConApp "Int" []) []]
--- >>> renderFgType (\fgType -> "(" <> renderFgType T.pack fgType <> ")") nestedFgType
--- >>> renderFgType T.pack $ joinFgType nestedFgType
--- "(Either String) (Int)"
--- "Either Int String"
+-- >>> let inputRendered = renderFgType (\fgType -> "(" <> renderFgType T.pack fgType <> ")") nestedFgType
+-- >>> let outputRendered = renderFgType T.pack $ joinFgType nestedFgType
+-- >>> inputRendered <> " / " <> outputRendered
+-- "(Either String) (Int) / Either Int String"
 joinFgType
   :: FgType (FgType tyCon)
   -> FgType tyCon
