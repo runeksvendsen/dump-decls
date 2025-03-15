@@ -7,12 +7,18 @@
 {-# HLINT ignore "Use <$>" #-}
 {-# LANGUAGE TypeOperators #-}
 {-# HLINT ignore "Use first" #-}
+{-# LANGUAGE LambdaCase #-}
 module Types.Doodle
 ( FunctionTypeForallSpecialized(..)
 , FunctionTypeForall
 , specializeType
 , mkFunctionTypeForall
 , extendFrom
+  -- * SomeFunction
+, SomeFunction(..)
+, eitherToSomeFunction
+, someFunctionMonomorphic
+, someFunctionPolymorphic
 )
 where
 
@@ -314,3 +320,30 @@ specializeType =
           (resultArgs, env'') <- mResultArgs
           Just (reverse resultArgs, env'')
 
+-- ####################################
+-- ########### SomeFunction ###########
+-- ####################################
+
+data SomeFunction
+  = SomeFunction_Monomorphic (FunctionType (FgType (FgTyCon T.Text)))
+  | SomeFunction_Polymorphic (FunctionTypeForall T.Text T.Text)
+
+eitherToSomeFunction
+  :: Either
+      (Json.FunctionType (FgType (FgTyCon T.Text)))
+      (FunctionTypeForall T.Text T.Text)
+  -> SomeFunction
+eitherToSomeFunction =
+  either SomeFunction_Monomorphic SomeFunction_Polymorphic
+
+someFunctionMonomorphic
+  :: SomeFunction -> Maybe (FunctionType (FgType (FgTyCon T.Text)))
+someFunctionMonomorphic = \case
+  SomeFunction_Monomorphic mono -> Just mono
+  SomeFunction_Polymorphic _ -> Nothing
+
+someFunctionPolymorphic
+  :: SomeFunction -> Maybe (FunctionTypeForall T.Text T.Text)
+someFunctionPolymorphic = \case
+  SomeFunction_Polymorphic poly -> Just poly
+  SomeFunction_Monomorphic _ -> Nothing
