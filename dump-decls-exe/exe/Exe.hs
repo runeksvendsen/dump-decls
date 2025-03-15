@@ -7,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Exe
 ( main
+, StdoutJsonFormat
 )
 where
 
@@ -57,6 +58,11 @@ import Data.Functor ((<&>), void)
 import qualified Data.Text.IO as TIO
 import qualified GHC.Driver.Session
 
+-- | The output printed to stdout can be parsed as JSON into this data type.
+--
+--   Using e.g. @Data.Aeson.decode :: Data.ByteString.Lazy.ByteString -> Maybe StdoutJsonFormat@
+type StdoutJsonFormat = [Json.DeclarationMapJson T.Text]
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -79,7 +85,7 @@ main = do
           , "failed to parse" <> "."
           , renderTyConParseError err
           ]
-  Json.streamPrintJsonList declarationMapJsonList
+  Json.streamPrintJsonList (declarationMapJsonList :: StdoutJsonFormat)
   where
     reallyCatch :: IO a -> IO (Either Control.Exception.SomeException a)
     reallyCatch ioAction =
