@@ -22,6 +22,8 @@ module Types
 , renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified, renderFgTypeFgTyConQualifiedNoPackage, fgTypeHackageSrcUrlsHtml
   -- * 'FgPackage'
 , FgPackage(..), parsePackageWithVersion, renderFgPackage
+  -- * 'FunctionType'
+, FunctionType(..)
   -- * (For testing)
 , splitByEndNonEmpty,
 )
@@ -550,6 +552,19 @@ parsePprTyCon str = do
     , fgTyConModule = moduleName
     , fgTyConPackage = package
     }
+
+data FunctionType value = FunctionType
+  { functionType_arg :: value
+  , functionType_ret :: value
+  } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
+
+instance A.ToJSON value => A.ToJSON (FunctionType value)
+instance A.FromJSON value => A.FromJSON (FunctionType value)
+instance NFData value => NFData (FunctionType value)
+
+instance Traversable FunctionType where
+  traverse f ft =
+    FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
 
 -- | Split string by last occurence of character.
 --   Return pair of non-empty text strings before and after character (neither string includes the character).

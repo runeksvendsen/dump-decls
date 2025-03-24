@@ -43,9 +43,9 @@ specPutStrLn =
     tyConString = parsePprTyCon "base-4.18.0.0:GHC.Base.String"
     tyConAppIOUnit = Types.FgType_TyConApp tyConIO [Types.FgType_Unit Types.Boxed] -- IO ()
 
-    ftPutStrLn = Json.FunctionType
-            { Json.functionType_arg = Types.FgType_List $ Just $ Types.FgType_TyConApp tyConChar [] -- [Char]
-            , Json.functionType_ret = tyConAppIOUnit
+    ftPutStrLn = Types.FunctionType
+            { Types.functionType_arg = Types.FgType_List $ Just $ Types.FgType_TyConApp tyConChar [] -- [Char]
+            , Types.functionType_ret = tyConAppIOUnit
             }
         -- , Json.typeInfo_unexpanded = Json.FunctionType
         --     { Json.functionType_arg = Types.FgType_TyConApp tyConString [] -- String
@@ -63,9 +63,9 @@ specUnsnoc =
     fgTypeChar = Types.FgType_TyConApp tyConChar []
     tyConMaybe = parsePprTyCon "base-4.18.0.0:GHC.Maybe.Maybe"
 
-    funtionType = Json.FunctionType
-      { Json.functionType_arg = fgTypeText
-      , Json.functionType_ret = Types.FgType_TyConApp
+    funtionType = Types.FunctionType
+      { Types.functionType_arg = fgTypeText
+      , Types.functionType_ret = Types.FgType_TyConApp
           tyConMaybe
           [Types.FgType_Tuple Types.Boxed 2 [fgTypeText, fgTypeChar]]
       }
@@ -74,7 +74,7 @@ mkSpec
   :: T.Text -- Package with version (e.g. @base-4.18.0.0@)
   -> T.Text -- Module name (e.g. @System.IO@)
   -> T.Text -- Definition name (e.g. @putStrLn@)
-  -> Json.FunctionType (Types.FgType (Types.FgTyCon T.Text))
+  -> Types.FunctionType (Types.FgType (Types.FgTyCon T.Text))
   -> [Json.DeclarationMapJson T.Text]
   -> Test.Hspec.Spec
 mkSpec pkgName modName defnName expected declarationMapJson =
@@ -105,7 +105,7 @@ tyConChar = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.Char"
 newtype IgnorePackageVersion a = IgnorePackageVersion a
   deriving (Show)
 
-instance Eq (IgnorePackageVersion (Json.FunctionType (Types.FgType (Types.FgTyCon T.Text)))) where
+instance Eq (IgnorePackageVersion (Types.FunctionType (Types.FgType (Types.FgTyCon T.Text)))) where
   IgnorePackageVersion ti1 == IgnorePackageVersion ti2 =
     let strikePkgVersionFgPackage pkg = pkg { Types.fgPackageVersion = "" }
 

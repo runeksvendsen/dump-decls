@@ -1,6 +1,11 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use fmap" #-}
 module Types.Forall
 ( -- * Types
   Forall
@@ -21,9 +26,26 @@ import qualified Data.Map.Ordered.Strict as OMap
 import Data.String (fromString)
 import GHC.Stack (HasCallStack)
 import Data.Functor (void)
+import Control.DeepSeq (NFData (rnf))
+import GHC.Generics (Generic)
+import qualified Data.Aeson as A
+import qualified Data.Vector as V
 
--- TODO
+-- TODO newtype
 type OrdMap k v = OMap k v
+
+instance (NFData k, NFData v) => NFData (OMap k v) where
+  rnf = rnf . OMap.toAscList
+instance (A.ToJSON k, A.ToJSONKey k, A.ToJSON v) => A.ToJSON (OMap k v) where
+  toJSON = A.toJSON . OMap.assocs
+instance (A.FromJSON k, A.FromJSONKey k, Ord k, A.FromJSON v) => A.FromJSON (OMap k v) where
+  parseJSON =
+    let parseKV = A.withArray "KeyValue" $ \vec ->
+          case V.toList vec of
+            [k, v] -> (,) <$> A.parseJSON k <*> A.parseJSON v
+            other -> fail $ "Expected two-element key-value list. Got: " <> show other
+    in A.withArray "OrdMap" $ \vec ->
+      OMap.fromList . V.toList <$> traverse parseKV vec
 
 -- insertion order
 toOrderedList :: OrdMap tyVar assoc -> [tyVar]
@@ -37,7 +59,12 @@ toOrderedList = reverse . map fst . OMap.assocs
 type Forall tyVar = ForallSpecialized tyVar ()
 
 newtype ForallSpecialized tyVar assoc = ForallSpecialized (OrdMap tyVar assoc)
-  deriving (Eq, Show, Ord, Functor, Foldable)
+  deriving (Eq, Show, Ord, Functor, Foldable, Generic)
+
+instance (NFData tyVar, NFData assoc) => NFData (ForallSpecialized tyVar assoc)
+
+instance (A.ToJSON tyVar, A.ToJSONKey tyVar, A.ToJSON assoc) => A.ToJSON (ForallSpecialized tyVar assoc)
+instance (A.FromJSON tyVar, A.FromJSONKey tyVar, Ord tyVar, A.FromJSON assoc) => A.FromJSON (ForallSpecialized tyVar assoc)
 
 elems
   :: ForallSpecialized k v
@@ -66,7 +93,11 @@ renderForall renderTyVar (ForallSpecialized ordMap) =
 --   This part of the type signature /references/ type variables introduced
 --   by the @forall@ part of the type signature.
 newtype TyVar tyVar = TyVar { unTyVar :: tyVar }
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
+
+instance (NFData tyVar) => NFData (TyVar tyVar)
+instance (A.ToJSON tyVar, A.ToJSONKey tyVar) => A.ToJSON (TyVar tyVar)
+instance (A.FromJSON tyVar, A.FromJSONKey tyVar, Ord tyVar) => A.FromJSON (TyVar tyVar)
 
 getTyVar :: TyVar tyVar -> tyVar
 getTyVar = unTyVar
@@ -136,4 +167,8 @@ data ForallError tyVar
   | NoSuchTypeVar -- ^ TODO:
       (NE.NonEmpty tyVar)
       tyVar
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord, Generic)
+
+instance (A.ToJSON tyVar, A.ToJSONKey tyVar) => A.ToJSON (ForallError tyVar)
+instance (A.FromJSON tyVar, A.FromJSONKey tyVar, Ord tyVar) => A.FromJSON (ForallError tyVar)
+instance (NFData tyVar) => NFData (ForallError tyVar)

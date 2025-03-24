@@ -57,6 +57,9 @@ import Data.Either (fromLeft, fromRight)
 import Data.Functor ((<&>), void)
 import qualified Data.Text.IO as TIO
 import qualified GHC.Driver.Session
+import qualified Types.Doodle as Doodle
+import Data.Void (Void, absurd)
+import Control.Monad.Trans.Except (ExceptT, throwE, except, withExcept, withExceptT, Except)
 
 -- | The output printed to stdout can be parsed as JSON into this data type.
 --
@@ -74,16 +77,16 @@ main = do
       runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\pprFun -> pure $ (pprFun, ghcLibDir, pkg_names))
   lst <- forM pkg_names $ \pkg_nm -> do
     unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
-  let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds) (Just . Right)) (catMaybes lst)
+  let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds) absurd) (catMaybes lst)
   forM_ declarationMapJsonList $ \declarationMapJson -> do
     let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
     forM_ errors $ \(modName, pkgErrs) ->
       forM_ pkgErrs $ \(defnName, err) ->
         logError $ T.unpack $ T.unwords
           [ "WARNING:"
-          , T.pack $ show (tyConParseErrorInput err)
+          -- , T.pack $ show (tyConParseErrorInput err) -- WIP
           , "failed to parse" <> "."
-          , renderTyConParseError err
+          , renderFgError err
           ]
   Json.streamPrintJsonList (declarationMapJsonList :: StdoutJsonFormat)
   where
@@ -137,7 +140,7 @@ getPprFun pkg_nm = do
           blahTodo sDocContext' = sDocContext'{sdocSuppressVarKinds = True, sdocPrintExplicitKinds = False, sdocStarIsType = True}
       in renderWithContext (blahTodo sDocContext) doc'
 
-getDefinitions :: (SDoc -> T.Text) -> String -> Ghc (Maybe (DeclarationMap (FgType (FgTyCon T.Text))))
+getDefinitions :: (SDoc -> T.Text) -> String -> Ghc (Maybe (DeclarationMap Void))
 getDefinitions pprFun pkg_nm = do
   _ <- setDFlags pkg_nm
   unit_state <- hsc_units <$> getSession
@@ -149,11 +152,13 @@ getDefinitions pprFun pkg_nm = do
     Nothing -> fail "unknown package"
   liftIO $ IO.hPutStrLn IO.stderr $ "   getDefinitions " ++ pkg_nm
   mDefinitions <- reportUnitDecls pprFun unit_info
+  -- WIP: pretty-print polymorphic functions to stderr
   forM_ mDefinitions $ \defs -> do
     let blah = concat $ map (ppFunctionMap pprFun) (Map.elems defs)
     void $ liftIO $ mapM (TIO.hPutStrLn IO.stderr) blah
-  let f :: Map ModuleName FunctionMap -> Map ModuleName (Map Name (Json.FunctionType (FgType (FgTyCon T.Text))))
-      f = fmap $ Map.mapMaybe $ either Just (const Nothing)
+  let f :: Map ModuleName FunctionMap
+        -> Map ModuleName (Map Name Doodle.SomeFunction)
+      f = fmap (fmap eitherToSomeFunction)
   pure $ DeclarationMap unit_id . f <$> mDefinitions
 
 ppFunctionMap
@@ -174,17 +179,17 @@ ppFunctionMap pprFun fm = catMaybes $
 
 prettyPrintFunction
   :: Either
-      (Json.FunctionType (FgType (FgTyCon T.Text)))
+      (FunctionType (FgType (FgTyCon T.Text)))
       (FunctionTypeForall T.Text T.Text)
   -> T.Text
 prettyPrintFunction =
   either prettyPrintFT prettyPrintFTF
 
-prettyPrintFT :: Json.FunctionType (FgType (FgTyCon T.Text)) -> T.Text
+prettyPrintFT :: FunctionType (FgType (FgTyCon T.Text)) -> T.Text
 prettyPrintFT ft = T.unwords
-  [ renderFgType renderFgTyConQualified (Json.functionType_arg ft)
+  [ renderFgType renderFgTyConQualified (functionType_arg ft)
   , "->"
-  , renderFgType renderFgTyConQualified (Json.functionType_ret ft)
+  , renderFgType renderFgTyConQualified (functionType_ret ft)
   ]
 
 prettyPrintFTF :: FunctionTypeForall T.Text T.Text -> T.Text
@@ -217,9 +222,12 @@ prettyPrintFTFGeneric renderFgTyCon ftf = T.unwords
 type FunctionMap =
   Map
     Name
-    (Either
-      (Json.FunctionType (FgType (FgTyCon T.Text)))
-      (FunctionTypeForall T.Text T.Text)
+    (Except
+      FgError
+      (Either
+        (FunctionType (FgType (FgTyCon T.Text)))
+        (FunctionTypeForall T.Text T.Text)
+      )
     )
 
 reportUnitDecls :: (SDoc -> T.Text) -> UnitInfo -> Ghc (Maybe (Map ModuleName FunctionMap))
@@ -273,81 +281,82 @@ reportModuleDecls pprFun unit_id modl_nm = do
 
 -- TODO: postpone conversion of GHC 'Type' to 'FgType'? Or just use 'funtionTypeExpandAndConvertToFgType' in here?
 parseType
-  :: (SDoc -> T.Text)
+  :: forall m.
+     (SDoc -> T.Text)
   -> UnitId
   -> (ModuleName, Name)
   -> Type
-  -> Maybe -- a 'Just' if this type is supported
-      (Either
-        (Json.FunctionType (FgType (FgTyCon T.Text))) -- only concrete types
-        (FunctionTypeForall T.Text T.Text) -- both concrete types and type variables
+  -> Maybe
+      (ExceptT
+        FgError
+        m
+        (Either
+            (FunctionType (FgType (FgTyCon T.Text))) -- only concrete types
+            (FunctionTypeForall T.Text T.Text) -- both concrete types and type variables
+        )
       )
-parseType pprFun package dbg tyInit =
+    -- ^ 'Nothing': type not supported
+    --   'Just': type supported
+parseType pprFun package dbg tyInit = sequenceA $
   case splitFunTys tyInit of
     ([], res) ->
       case res of
-        ForAllTy bndr ty' | isTypeKind bndr ->
-          Right <$> goForall (parseForall Nothing bndr) ty'
-        _ -> Nothing
+        ForAllTy bndr ty' | isTypeKind bndr -> do
+          forall_ <- parseForall Nothing bndr
+          fmap Right <$> goForall forall_ ty'
+        _ -> pure Nothing
     ([_], _) ->
-      Left <$> goSimple tyInit
-    _ -> Nothing
+      fmap Left <$> goSimple tyInit
+    _ -> pure Nothing
   where
+    goForall
+      :: Forall.Forall T.Text
+      -> Type
+      -> ExceptT
+          FgError
+          m
+          (Maybe (FunctionTypeForall T.Text T.Text))
     goForall forall_ ty =
       case splitFunTys ty of
         ([], res) ->
           case res of
             ForAllTy bndr ty' | isTypeKind bndr -> do
-              goForall (parseForall (Just forall_) bndr) ty'
-            _ -> Nothing
+              forall_' <- parseForall (Just forall_) bndr
+              goForall forall_' ty'
+            _ -> pure Nothing
         ([arg], res) | not (returnsConstraintKind $ GHC.Core.Type.typeKind (scaledThing arg)) -> do
-            arg' <- toFgType' pprFun $ scaledThing arg
-            res' <- toFgType' pprFun res
-            let eResult = do
-                  arg'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) arg'
-                  res'' <- traverse (tyConOrTyVarTODO pprFun package dbg forall_) res'
-                  let debugPrintDiff ftf =
-                        let ftfTxt = prettyPrintFTFGeneric renderFgTyConQualified ftf
-                            ftfTxtGhc = pprFun $ fullyQualify $ ppr tyInit
-                            nameTxt = pprFun $ ppr (snd dbg)
-                        -- TODO: add this to a test suite!!
-                        in if ftfTxt /= ftfTxtGhc
-                          then T.unpack ("DIFF: " <> nameTxt <> "\n      " <> ftfTxt <> "\n      " <> ftfTxtGhc <> "\n") `trace` ftf
-                          else ftf
-                  pure $ (if doDebugPrintDiff then debugPrintDiff else id) $ mkFunctionTypeForall forall_ arg'' res''
-            pure $
-              either
-              throwError -- WIP: don't throw exception
-              id
-              eResult
-        (_, _) -> Nothing
-
-    doDebugPrintDiff = True
+            let mArgRes = do
+                  arg' <- toFgType' pprFun $ scaledThing arg
+                  res' <- toFgType' pprFun res
+                  Just (arg', res')
+            case mArgRes of
+              Just (arg', res') -> do
+                arg'' <- except $ traverse (tyConOrTyVarTODO pprFun package dbg forall_) arg'
+                res'' <- except $ traverse (tyConOrTyVarTODO pprFun package dbg forall_) res'
+                pure $ Just $ mkFunctionTypeForall forall_ arg'' res''
+              Nothing -> pure Nothing
+        (_, _) -> pure Nothing
 
     goSimple ty =
       case splitFunTys ty of
         ([arg], res) -> do
-          arg' <- toFgType pprFun $ scaledThing arg
-          res' <- toFgType pprFun res
-          let eResult = do
-                arg'' <- traverse (tyConToFgTyCon pprFun package dbg) arg'
-                res'' <- traverse (tyConToFgTyCon pprFun package dbg) res'
-                pure $ Json.FunctionType arg'' res''
-          pure $
-            either
-            throwError -- WIP: don't throw exception
-            id
-            eResult
-        _ -> Nothing
+          let mArgRes = do
+                arg' <- toFgType pprFun $ scaledThing arg
+                res' <- toFgType pprFun res
+                Just (arg', res')
+          case mArgRes of
+            Just (arg', res') -> withExceptT FgError_TyCon $ do
+              arg'' <- except $ traverse (tyConToFgTyCon pprFun package dbg) arg'
+              res'' <- except $ traverse (tyConToFgTyCon pprFun package dbg) res'
+              pure $ Just $ FunctionType arg'' res''
+            Nothing -> pure Nothing
+        _ -> pure Nothing
 
     parseForall mForall (Bndr tyCoVar _) =
       let mkForall = maybe (Right . Forall.singleton) (\forall' -> (`Forall.appendTyVar` forall')) mForall
           tyVarName = pprFun (ppr tyCoVar) -- WIP: correct?
           eForall = mkForall tyVarName
-      in either throwError id eForall -- WIP: don't throw exception
-
-    throwError showable =
-      error $ show showable ++ " -- " ++ T.unpack (pprFun $ ppr tyInit)
+      in either (throwE . FgError_Forall) pure eForall -- WIP: don't throw exception
 
     -- is kind *
     isTypeKind (Bndr tyVar _) =
@@ -355,7 +364,7 @@ parseType pprFun package dbg tyInit =
 
 data DeclarationMap ty = DeclarationMap
   { declarationMap_package :: UnitId
-  , declarationMap_moduleDeclarations :: Map ModuleName (Map Name (Json.FunctionType ty))
+  , declarationMap_moduleDeclarations :: Map ModuleName (Map Name Doodle.SomeFunction)
     -- ^ -- A map from a module name to the declarations in that module
   }
 
@@ -367,11 +376,11 @@ declarationMapToJson
   -> Json.DeclarationMapJson T.Text
 declarationMapToJson pprFun tyToFgType dm =
   let
-    eitherMap :: Map T.Text (Map T.Text (Either TyConParseError (Json.FunctionType (FgType (FgTyCon T.Text)))))
+    eitherMap :: Map T.Text (Map T.Text (Either FgError SomeFunction))
     eitherMap = mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
       ( fullyQualify' modName
-      , mapMapMaybe nameMap $ \(name, functionType) ->
-          (noQualify' name, funtionTypeConvertToFgType (modName, name) functionType)
+      , mapMapMaybe nameMap $ \(name, someFunction) ->
+          (noQualify' name, Just $ Right someFunction)
       )
 
   in Json.DeclarationMapJson
@@ -398,23 +407,9 @@ declarationMapToJson pprFun tyToFgType dm =
     mapMapMaybe :: Ord k' => Map k a -> ((k, a) -> (k', Maybe a')) -> Map k' a'
     mapMapMaybe map' f = Map.fromList . map (fmap fromJust) . filter (isJust . snd) . map f . Map.toList $ map'
 
-    funtionTypeConvertToFgType
-      :: (ModuleName, Name) -- for debugging purposes
-      -> Json.FunctionType ty
-      -> Maybe (Either TyConParseError (Json.FunctionType (FgType (FgTyCon T.Text))))
-    funtionTypeConvertToFgType dbg funType = do
-      let convert :: Type -> Maybe (Either TyConParseError (FgType (FgTyCon T.Text)))
-          convert = fmap (traverse (tyConToFgTyCon pprFun package dbg)) . toFgType pprFun
-      sequenceA <$> traverse tyToFgType funType
-
     fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . fullyQualify
     noQualify' = pprFun . noQualify
-
-data TodoError -- WIP
-  = TodoError_Forall (Forall.ForallError T.Text)
-  | TodoError_TyCon TyConParseError
-      deriving (Eq, Show)
 
 tyConOrTyVarTODO
   :: (SDoc -> T.Text)
@@ -422,11 +417,11 @@ tyConOrTyVarTODO
   -> (ModuleName, Name) -- for debugging purposes
   -> Forall.Forall T.Text
   -> Either TyCon TyVar
-  -> Either TodoError (Either (FgTyCon T.Text) (Forall.TyVar T.Text))
+  -> Either FgError (Either (FgTyCon T.Text) (Forall.TyVar T.Text))
 tyConOrTyVarTODO pprFun package dbg forall_ =
   either
-    (fmap Left . first TodoError_TyCon . tyConToFgTyCon pprFun package dbg)
-    (fmap Right . first TodoError_Forall . tyVarToTODO pprFun package dbg forall_)
+    (fmap Left . first FgError_TyCon . tyConToFgTyCon pprFun package dbg)
+    (fmap Right . first FgError_Forall . tyVarToTODO pprFun package dbg forall_)
 
 tyVarToTODO
   :: (SDoc -> T.Text)

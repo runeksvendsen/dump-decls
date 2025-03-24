@@ -8,6 +8,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# HLINT ignore "Use first" #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Types.Doodle
 ( FunctionTypeForallSpecialized(..)
 , FunctionTypeForall
@@ -19,20 +20,28 @@ module Types.Doodle
 , eitherToSomeFunction
 , someFunctionMonomorphic
 , someFunctionPolymorphic
+  -- * `FgError`
+, FgError(..)
+, renderFgError
 )
 where
 
 import Types
 import Types.Forall
 import qualified Types.Forall as Forall
-import Json
+-- import Json
 import qualified Data.Text as T
+import Data.Map (Map)
 import qualified Data.Map as Map
 import Control.Monad (foldM)
 import Data.Bifunctor (first)
 import Data.Functor ((<&>))
 import Data.Foldable (foldl')
 import Data.Maybe (fromMaybe, fromJust)
+import GHC.Generics (Generic)
+import Control.DeepSeq (NFData)
+import qualified Data.Aeson as A
+import Data.String (fromString)
 
 type FunctionTypeNoTyVar =
   FunctionType (FgType (FgTyCon T.Text))
@@ -50,7 +59,11 @@ data FunctionTypeForallSpecialized tyVar tyVarAssoc text = FunctionTypeForallSpe
   { ftf_forall :: ForallSpecialized tyVar tyVarAssoc
   , ftf_arg :: FgType (Either (FgTyCon text) (TyVar tyVar))
   , ftf_ret :: FgType (Either (FgTyCon text) (TyVar tyVar))
-  }
+  } deriving (Eq, Show, Ord, Generic)
+
+instance (NFData tyVar, NFData tyVarAssoc, NFData text) => NFData (FunctionTypeForallSpecialized tyVar tyVarAssoc text)
+instance (A.ToJSON tyVar, A.ToJSONKey tyVar, A.ToJSON tyVarAssoc, A.ToJSON text) => A.ToJSON (FunctionTypeForallSpecialized tyVar tyVarAssoc text)
+instance (A.FromJSON tyVar, A.FromJSONKey tyVar, Ord tyVar, A.FromJSON tyVarAssoc, A.FromJSON text) => A.FromJSON (FunctionTypeForallSpecialized tyVar tyVarAssoc text)
 
 -- WIP: something more type safe than this conversion
 specializationEnvToForallSpecialized
@@ -324,13 +337,19 @@ specializeType =
 -- ########### SomeFunction ###########
 -- ####################################
 
+-- WIP: take `text` type arg?
 data SomeFunction
   = SomeFunction_Monomorphic (FunctionType (FgType (FgTyCon T.Text)))
   | SomeFunction_Polymorphic (FunctionTypeForall T.Text T.Text)
+      deriving (Eq, Show, Ord, Generic)
+
+instance NFData SomeFunction
+instance A.ToJSON SomeFunction
+instance A.FromJSON SomeFunction
 
 eitherToSomeFunction
   :: Either
-      (Json.FunctionType (FgType (FgTyCon T.Text)))
+      (FunctionType (FgType (FgTyCon T.Text)))
       (FunctionTypeForall T.Text T.Text)
   -> SomeFunction
 eitherToSomeFunction =
@@ -347,3 +366,25 @@ someFunctionPolymorphic
 someFunctionPolymorphic = \case
   SomeFunction_Polymorphic poly -> Just poly
   SomeFunction_Monomorphic _ -> Nothing
+
+data FgError
+  = FgError_Forall (Forall.ForallError T.Text)
+  | FgError_TyCon TyConParseError
+    -- ^ An error occurred converting a 'GHC.Core.TyCon.TyCon' into a 'FgTyCon'.
+    --   This is probably a bug in 'Types.parsePprTyCon'.
+      deriving (Eq, Show, Ord, Generic)
+
+instance A.ToJSON FgError
+instance A.FromJSON FgError
+instance NFData FgError
+
+-- | Render a 'FgError' as a human-readable text string
+renderFgError
+  :: FgError
+  -> T.Text
+renderFgError = \case
+  FgError_TyCon e -> renderTyConParseError e
+  FgError_Forall e -> T.unwords
+    [ fromString "WIP:"
+    , T.pack $ show e
+    ]

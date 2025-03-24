@@ -5,9 +5,8 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TupleSections #-}
 module Json
-( FunctionType(..)
-, ModuleDeclarations(..), fmapModuleDeclarations, explodeModuleDeclarations
-, DeclarationMapJson(..), fmapDeclarationMapJson
+( ModuleDeclarations(..), explodeModuleDeclarations
+, DeclarationMapJson(..)
   -- * Util
 , streamPrintJsonList
   -- * Re-exports
@@ -23,7 +22,8 @@ import qualified Data.Aeson as A
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Map as Map
-import Types (FgType, FgTyCon, TyConParseError, FgPackage)
+import Types (TyConParseError, FgPackage)
+import qualified Types.Doodle as Doodle
 
 streamPrintJsonList
   :: A.ToJSON a
@@ -39,43 +39,20 @@ streamPrintJsonList jsonList =
         (map (BSL.putStrLn . A.encode) jsonList)
     )
 
-data FunctionType value = FunctionType
-  { functionType_arg :: value
-  , functionType_ret :: value
-  } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
-
-instance A.ToJSON value => A.ToJSON (FunctionType value)
-instance A.FromJSON value => A.FromJSON (FunctionType value)
-instance NFData value => NFData (FunctionType value)
-
-instance Traversable FunctionType where
-  traverse f ft =
-    FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
-
 data ModuleDeclarations value = ModuleDeclarations
-  { moduleDeclarations_map :: Map value (Map value (FunctionType (FgType (FgTyCon value))))
+  { moduleDeclarations_map :: Map value (Map value Doodle.SomeFunction) -- WIP: move somewhere else
     -- ^ Map from module name to a map of unqualified function names to 'TypeInfo'
-  , moduleDeclarations_mapFail :: Map value (Map value TyConParseError)
-    -- ^ Declarations for which an error occurred converting a 'GHC.Core.TyCon.TyCon' into a 'FgTyCon'.
-    --   This is probably a bug in 'Types.parsePprTyCon'.
+  , moduleDeclarations_mapFail :: Map value (Map value Doodle.FgError)
+    -- ^ TODO
   } deriving (Eq, Show, Ord, Generic)
 
 instance (A.ToJSON a, A.ToJSONKey a) => A.ToJSON (ModuleDeclarations a)
 instance (A.FromJSON a, A.FromJSONKey a, Ord a) => A.FromJSON (ModuleDeclarations a)
 instance (NFData a) => NFData (ModuleDeclarations a)
 
-fmapModuleDeclarations
-  :: Ord b
-  => (a -> b)
-  -> ModuleDeclarations a
-  -> ModuleDeclarations b
-fmapModuleDeclarations f (ModuleDeclarations map' mapFail) = ModuleDeclarations
-  (Map.mapKeys f (fmap (Map.mapKeys f . fmap (fmap (fmap (fmap f)))) map'))
-  (Map.mapKeys f (fmap (Map.mapKeys f) mapFail))
-
 explodeModuleDeclarations
   :: ModuleDeclarations value
-  -> [(value, (value, FunctionType (FgType (FgTyCon value))))]
+  -> [(value, (value, Doodle.SomeFunction))]
 explodeModuleDeclarations =
   concatMap (\(value, lst) -> map (value,) lst)
     . Map.toList
@@ -88,18 +65,6 @@ data DeclarationMapJson value = DeclarationMapJson
   } deriving (Eq, Generic, Show)
 
 instance NFData a => NFData (DeclarationMapJson a)
-
-fmapDeclarationMapJson
-  :: Ord b
-  => (a -> b)
-  -> DeclarationMapJson a
-  -> DeclarationMapJson b
-fmapDeclarationMapJson f dmj =
-  DeclarationMapJson
-    { declarationMapJson_package = f <$> declarationMapJson_package dmj
-    , declarationMapJson_moduleDeclarations = fmapModuleDeclarations f $ declarationMapJson_moduleDeclarations dmj
-
-    }
 
 instance (A.ToJSONKey value, A.ToJSON value) => A.ToJSON (DeclarationMapJson value)
 instance (Ord value, A.FromJSONKey value, A.FromJSON value) => A.FromJSON (DeclarationMapJson value)
