@@ -364,23 +364,22 @@ parseType pprFun package dbg tyInit = sequenceA $
 
 data DeclarationMap ty = DeclarationMap
   { declarationMap_package :: UnitId
-  , declarationMap_moduleDeclarations :: Map ModuleName (Map Name Doodle.SomeFunction)
+  , declarationMap_moduleDeclarations :: Map ModuleName (Map Name ty)
     -- ^ -- A map from a module name to the declarations in that module
   }
 
 declarationMapToJson
   :: forall ty.
      (SDoc -> T.Text)
-  -> (ty -> Maybe (Either TyConParseError (FgType (FgTyCon T.Text))))
-  -> DeclarationMap ty
+  -> DeclarationMap (Either FgError SomeFunction)
   -> Json.DeclarationMapJson T.Text
-declarationMapToJson pprFun tyToFgType dm =
+declarationMapToJson pprFun dm =
   let
     eitherMap :: Map T.Text (Map T.Text (Either FgError SomeFunction))
     eitherMap = mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
       ( fullyQualify' modName
-      , mapMapMaybe nameMap $ \(name, someFunction) ->
-          (noQualify' name, Just $ Right someFunction)
+      , mapMapMaybe nameMap $ \(name, either') -> — TODO: no Maybe
+          (noQualify' name, either')
       )
 
   in Json.DeclarationMapJson
