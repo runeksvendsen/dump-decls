@@ -15,9 +15,7 @@ import Types
 import qualified Json
 import Types.Doodle -- TODO
 import GHC hiding (moduleName)
-import qualified GHC.Paths
 import GHC.Core.Type (splitFunTys, expandTypeSynonyms, isLiftedTypeKind, isConstraintKind, returnsConstraintKind, typeKind)
-import GHC.Driver.Ppr (showSDocForUser)
 import GHC.Unit.State (lookupUnitId, lookupPackageName, pprWithUnitState)
 import GHC.Unit.Info (UnitInfo, unitExposedModules, unitId, PackageName(..))
 import GHC.Unit.Types (UnitId)
@@ -29,12 +27,11 @@ import GHC.Types.Name (nameOccName, getSrcLoc)
 import GHC.Types.Name.Occurrence (OccName)
 import GHC.Types.Var (varName, varType, VarBndr (Bndr), tyVarKind)
 import Data.Function (on)
-import Data.List (sortBy, foldl')
+import Data.List (sortBy)
 import System.Environment (getArgs)
-import Control.Monad (forM, forM_, unless)
+import Control.Monad (forM, forM_)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import qualified Data.List.NonEmpty as NE
 import qualified System.Exit as Exit
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import GHC.IO.Unsafe (unsafeInterleaveIO)
@@ -48,18 +45,14 @@ import GHC.Core.TyCo.Rep (Type(..), KindOrType)
 import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon, isTupleTyCon)
 import GHC.Builtin.Names (listTyConKey, getUnique)
 import qualified Data.Text as T
-import Data.Bifunctor (bimap, first)
-import GHC.Stack (HasCallStack)
-import Data.Functor.Identity (Identity(Identity))
-import Debug.Trace (trace)
+import Data.Bifunctor (first)
 import qualified Types.Forall as Forall
-import Data.Either (fromLeft, fromRight)
+import Data.Either (fromLeft)
 import Data.Functor ((<&>), void)
 import qualified Data.Text.IO as TIO
 import qualified GHC.Driver.Session
 import qualified Types.Doodle as Doodle
-import Data.Void (Void, absurd)
-import Control.Monad.Trans.Except (ExceptT, throwE, except, withExcept, withExceptT, Except)
+import Control.Monad.Trans.Except (ExceptT, throwE, except, withExceptT, Except, runExcept)
 
 -- | The output printed to stdout can be parsed as JSON into this data type.
 --
@@ -77,14 +70,13 @@ main = do
       runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\pprFun -> pure $ (pprFun, ghcLibDir, pkg_names))
   lst <- forM pkg_names $ \pkg_nm -> do
     unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
-  let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds) absurd) (catMaybes lst)
+  let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds)) (catMaybes lst)
   forM_ declarationMapJsonList $ \declarationMapJson -> do
     let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
     forM_ errors $ \(modName, pkgErrs) ->
       forM_ pkgErrs $ \(defnName, err) ->
         logError $ T.unpack $ T.unwords
           [ "WARNING:"
-          -- , T.pack $ show (tyConParseErrorInput err) -- WIP
           , "failed to parse" <> "."
           , renderFgError err
           ]
@@ -140,7 +132,7 @@ getPprFun pkg_nm = do
           blahTodo sDocContext' = sDocContext'{sdocSuppressVarKinds = True, sdocPrintExplicitKinds = False, sdocStarIsType = True}
       in renderWithContext (blahTodo sDocContext) doc'
 
-getDefinitions :: (SDoc -> T.Text) -> String -> Ghc (Maybe (DeclarationMap Void))
+getDefinitions :: (SDoc -> T.Text) -> String -> Ghc (Maybe (DeclarationMap (Either FgError SomeFunction)))
 getDefinitions pprFun pkg_nm = do
   _ <- setDFlags pkg_nm
   unit_state <- hsc_units <$> getSession
@@ -157,8 +149,8 @@ getDefinitions pprFun pkg_nm = do
     let blah = concat $ map (ppFunctionMap pprFun) (Map.elems defs)
     void $ liftIO $ mapM (TIO.hPutStrLn IO.stderr) blah
   let f :: Map ModuleName FunctionMap
-        -> Map ModuleName (Map Name Doodle.SomeFunction)
-      f = fmap (fmap eitherToSomeFunction)
+        -> Map ModuleName (Map Name (Either FgError Doodle.SomeFunction))
+      f = fmap (fmap (fmap eitherToSomeFunction . runExcept))
   pure $ DeclarationMap unit_id . f <$> mDefinitions
 
 ppFunctionMap
@@ -168,7 +160,7 @@ ppFunctionMap
 ppFunctionMap pprFun fm = catMaybes $
    -- WIP: ignore non-forall functions for now
   Map.toList fm <&> \(name, fun) ->
-    either (const Nothing) (ppTodo name) fun
+    either (const Nothing) (either (const Nothing) (ppTodo name)) (runExcept fun)
   where
     ppTodo name !fun = Just $
       T.unwords
@@ -282,7 +274,8 @@ reportModuleDecls pprFun unit_id modl_nm = do
 -- TODO: postpone conversion of GHC 'Type' to 'FgType'? Or just use 'funtionTypeExpandAndConvertToFgType' in here?
 parseType
   :: forall m.
-     (SDoc -> T.Text)
+     (Traversable m, Monad m)
+  => (SDoc -> T.Text)
   -> UnitId
   -> (ModuleName, Name)
   -> Type
@@ -369,8 +362,7 @@ data DeclarationMap ty = DeclarationMap
   }
 
 declarationMapToJson
-  :: forall ty.
-     (SDoc -> T.Text)
+  :: (SDoc -> T.Text)
   -> DeclarationMap (Either FgError SomeFunction)
   -> Json.DeclarationMapJson T.Text
 declarationMapToJson pprFun dm =
@@ -378,8 +370,8 @@ declarationMapToJson pprFun dm =
     eitherMap :: Map T.Text (Map T.Text (Either FgError SomeFunction))
     eitherMap = mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
       ( fullyQualify' modName
-      , mapMapMaybe nameMap $ \(name, either') -> — TODO: no Maybe
-          (noQualify' name, either')
+      , mapMapMaybe nameMap $ \(name, either') ->
+          (noQualify' name, Just either') -- WIP: no Maybe
       )
 
   in Json.DeclarationMapJson

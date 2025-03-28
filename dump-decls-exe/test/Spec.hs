@@ -15,6 +15,8 @@ import qualified Test.Hspec
 import Test.Hspec.Expectations.Pretty (shouldNotBe, shouldBe)
 import Data.Maybe (fromJust)
 import qualified Data.Map as Map
+import qualified Types.Doodle
+import Data.Bifunctor (first)
 
 main :: IO ()
 main = do
@@ -30,7 +32,7 @@ main = do
 
 spec :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
 spec declarationMapJson =
-  Test.Hspec.describe "Expected TypeInfo" $ do
+  Test.Hspec.describe "Expected FunctionType" $ do
     specPutStrLn declarationMapJson
     specUnsnoc declarationMapJson
 
@@ -40,18 +42,13 @@ specPutStrLn =
     mkSpec "base" "System.IO" "putStrLn" ftPutStrLn
   where
     tyConIO = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
-    tyConString = parsePprTyCon "base-4.18.0.0:GHC.Base.String"
     tyConAppIOUnit = Types.FgType_TyConApp tyConIO [Types.FgType_Unit Types.Boxed] -- IO ()
 
-    ftPutStrLn = Types.FunctionType
-            { Types.functionType_arg = Types.FgType_List $ Just $ Types.FgType_TyConApp tyConChar [] -- [Char]
-            , Types.functionType_ret = tyConAppIOUnit
-            }
-        -- , Json.typeInfo_unexpanded = Json.FunctionType
-        --     { Json.functionType_arg = Types.FgType_TyConApp tyConString [] -- String
-        --     , Json.functionType_ret = tyConAppIOUnit
-        --     }
-        -- }
+    ftPutStrLn =
+      Types.FunctionType
+        { Types.functionType_arg = Types.FgType_List $ Just $ Types.FgType_TyConApp tyConChar [] -- [Char]
+        , Types.functionType_ret = tyConAppIOUnit
+        }
 
 -- | Data.Text.unsnoc :: Text -> Maybe (Text, Char)
 specUnsnoc :: [Json.DeclarationMapJson T.Text] -> Test.Hspec.Spec
@@ -88,7 +85,7 @@ mkSpec pkgName modName defnName expected declarationMapJson =
         mTypeInfo = mDefnMap >>= Map.lookup defnName
         typeInfo = fromJust mTypeInfo
     mTypeInfo `shouldNotBe` Nothing
-    IgnorePackageVersion typeInfo `shouldBe` IgnorePackageVersion expected
+    IgnorePackageVersion typeInfo `shouldBe` IgnorePackageVersion (Types.Doodle.SomeFunction_Monomorphic expected)
 
 parsePprTyCon :: T.Text -> Types.FgTyCon T.Text
 parsePprTyCon = either error id . Types.parsePprTyCon
@@ -118,3 +115,29 @@ instance Eq (IgnorePackageVersion (Types.FunctionType (Types.FgType (Types.FgTyC
         strikePkgVersionTypeInfo ti = fmap strikePkgVersionFgType ti
 
     in strikePkgVersionTypeInfo ti1 == strikePkgVersionTypeInfo ti2
+
+instance Eq (IgnorePackageVersion (Types.Doodle.FunctionTypeForall T.Text T.Text)) where
+  IgnorePackageVersion ftf1 == IgnorePackageVersion ftf2 =
+    let strikePkgVersionFgPackage pkg = pkg { Types.fgPackageVersion = "" }
+
+        strikePkgVersionFgTyCon tc = tc {
+            Types.fgTyConPackage = strikePkgVersionFgPackage (Types.fgTyConPackage tc)
+          }
+
+        strikePkgVersionFgType fgt = fmap (first strikePkgVersionFgTyCon) fgt
+
+        strikePkgVersionFtf ftf =
+          ftf
+            { Types.Doodle.ftf_arg = strikePkgVersionFgType (Types.Doodle.ftf_arg ftf)
+            , Types.Doodle.ftf_ret = strikePkgVersionFgType (Types.Doodle.ftf_ret ftf)
+            }
+
+    in strikePkgVersionFtf ftf1 == strikePkgVersionFtf ftf2
+
+instance Eq (IgnorePackageVersion Types.Doodle.SomeFunction) where
+  IgnorePackageVersion sf1 == IgnorePackageVersion sf2 = case (sf1, sf2) of
+    (Types.Doodle.SomeFunction_Monomorphic sf1', Types.Doodle.SomeFunction_Monomorphic sf2') ->
+      IgnorePackageVersion sf1' == IgnorePackageVersion sf2'
+    (Types.Doodle.SomeFunction_Polymorphic sf1', Types.Doodle.SomeFunction_Polymorphic sf2') ->
+      IgnorePackageVersion sf1' == IgnorePackageVersion sf2'
+    _ -> False
