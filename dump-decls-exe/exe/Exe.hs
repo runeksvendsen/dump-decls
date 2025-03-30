@@ -144,10 +144,6 @@ getDefinitions pprFun pkg_nm = do
     Nothing -> fail "unknown package"
   liftIO $ IO.hPutStrLn IO.stderr $ "   getDefinitions " ++ pkg_nm
   mDefinitions <- reportUnitDecls pprFun unit_info
-  -- WIP: pretty-print polymorphic functions to stderr
-  forM_ mDefinitions $ \defs -> do
-    let blah = concat $ map (ppFunctionMap pprFun) (Map.elems defs)
-    void $ liftIO $ mapM (TIO.hPutStrLn IO.stderr) blah
   let f :: Map ModuleName FunctionMap
         -> Map ModuleName (Map Name (Either FgError Doodle.SomeFunction))
       f = fmap (fmap (fmap eitherToSomeFunction . runExcept))
