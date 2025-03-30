@@ -71,15 +71,6 @@ main = do
   lst <- forM pkg_names $ \pkg_nm -> do
     unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
   let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds)) (catMaybes lst)
-  forM_ declarationMapJsonList $ \declarationMapJson -> do
-    let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
-    forM_ errors $ \(modName, pkgErrs) ->
-      forM_ pkgErrs $ \(defnName, err) ->
-        logError $ T.unpack $ T.unwords
-          [ "WARNING:"
-          , "failed to parse" <> "."
-          , renderFgError err
-          ]
   Json.streamPrintJsonList (declarationMapJsonList :: StdoutJsonFormat)
   where
     reallyCatch :: IO a -> IO (Either Control.Exception.SomeException a)
