@@ -23,7 +23,7 @@ module Types
   -- * 'FgPackage'
 , FgPackage(..), parsePackageWithVersion, renderFgPackage
   -- * 'FunctionType'
-, FunctionType(..)
+, FunctionType(..), renderFunctionTypeMono, renderFunctionTypeMonoGeneric
   -- * (For testing)
 , splitByEndNonEmpty,
 )
@@ -565,6 +565,19 @@ instance NFData value => NFData (FunctionType value)
 instance Traversable FunctionType where
   traverse f ft =
     FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
+
+renderFunctionTypeMono :: FunctionType (FgType (FgTyCon T.Text)) -> T.Text
+renderFunctionTypeMono =
+  renderFunctionTypeMonoGeneric renderFgTyConQualified
+
+renderFunctionTypeMonoGeneric
+  :: (FgTyCon T.Text -> T.Text)
+  -> FunctionType (FgType (FgTyCon T.Text)) -> T.Text
+renderFunctionTypeMonoGeneric renderTyCon ft = T.unwords
+  [ renderFgType renderTyCon (functionType_arg ft)
+  , "->"
+  , renderFgType renderTyCon (functionType_ret ft)
+  ]
 
 -- | Split string by last occurence of character.
 --   Return pair of non-empty text strings before and after character (neither string includes the character).

@@ -153,50 +153,8 @@ ppFunctionMap pprFun fm = catMaybes $
       T.unwords
         [ pprFun (ppr name)
         , "::"
-        , prettyPrintFTFGeneric renderFgTyConUnqualified fun
+        , renderFunctionTypeForallGeneric id renderFgTyConUnqualified fun
         ]
-
-prettyPrintFunction
-  :: Either
-      (FunctionType (FgType (FgTyCon T.Text)))
-      (FunctionTypeForall T.Text T.Text)
-  -> T.Text
-prettyPrintFunction =
-  either prettyPrintFT prettyPrintFTF
-
-prettyPrintFT :: FunctionType (FgType (FgTyCon T.Text)) -> T.Text
-prettyPrintFT ft = T.unwords
-  [ renderFgType renderFgTyConQualified (functionType_arg ft)
-  , "->"
-  , renderFgType renderFgTyConQualified (functionType_ret ft)
-  ]
-
-prettyPrintFTF :: FunctionTypeForall T.Text T.Text -> T.Text
-prettyPrintFTF ftf = T.unwords
-  [ Forall.renderForall id $ ftf_forall ftf
-  , renderFgType' $ ftf_arg ftf
-  , "->"
-  , renderFgType' $ ftf_ret ftf
-  ]
-  where
-    renderFgType' :: FgType (Either (FgTyCon T.Text) (Forall.TyVar T.Text)) -> T.Text
-    renderFgType' =
-      renderFgType (either renderFgTyConQualifiedNoPackage Forall.getTyVar)
-
-prettyPrintFTFGeneric
-  :: (FgTyCon T.Text -> T.Text)
-  -> FunctionTypeForall T.Text T.Text
-  -> T.Text
-prettyPrintFTFGeneric renderFgTyCon ftf = T.unwords
-  [ Forall.renderForall id $ ftf_forall ftf
-  , renderFgType' $ ftf_arg ftf
-  , "->"
-  , renderFgType' $ ftf_ret ftf
-  ]
-  where
-    renderFgType' :: FgType (Either (FgTyCon T.Text) (Forall.TyVar T.Text)) -> T.Text
-    renderFgType' =
-      renderFgType (either renderFgTyCon Forall.getTyVar)
 
 type FunctionMap =
   Map

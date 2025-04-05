@@ -23,6 +23,8 @@ module Types.Doodle
   -- * `FgError`
 , FgError(..)
 , renderFgError
+, renderFunctionTypeForallGeneric
+, renderSomeFunctionType
 )
 where
 
@@ -37,7 +39,7 @@ import Control.Monad (foldM)
 import Data.Bifunctor (first)
 import Data.Functor ((<&>))
 import Data.Foldable (foldl')
-import Data.Maybe (fromMaybe, fromJust)
+import Data.Maybe (fromJust)
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
 import qualified Data.Aeson as A
@@ -54,6 +56,32 @@ mkFunctionTypeForall
   -> FgType (Either (FgTyCon text) (TyVar tyVar))
   -> FunctionTypeForallSpecialized tyVar tyVarAssoc text
 mkFunctionTypeForall = FunctionTypeForallSpecialized
+
+renderFunctionTypeForallUnqualified
+  :: Show tyVar
+  => FunctionTypeForall tyVar T.Text
+  -> T.Text
+renderFunctionTypeForallUnqualified =
+  renderFunctionTypeForallGeneric
+    (T.pack . read . show) -- WIP
+    renderFgTyConUnqualified
+
+renderFunctionTypeForallGeneric
+  :: forall tyVar.
+     (tyVar -> T.Text)
+  -> (FgTyCon T.Text -> T.Text)
+  -> FunctionTypeForall tyVar T.Text
+  -> T.Text
+renderFunctionTypeForallGeneric renderTyVar renderFgTyCon ftf = T.unwords
+  [ Forall.renderForall renderTyVar $ ftf_forall ftf
+  , renderFgType' $ ftf_arg ftf
+  , fromString "->"
+  , renderFgType' $ ftf_ret ftf
+  ]
+  where
+    renderFgType' :: FgType (Either (FgTyCon T.Text) (Forall.TyVar tyVar)) -> T.Text
+    renderFgType' =
+      renderFgType (either renderFgTyCon (renderTyVar . Forall.getTyVar))
 
 data FunctionTypeForallSpecialized tyVar tyVarAssoc text = FunctionTypeForallSpecialized
   { ftf_forall :: ForallSpecialized tyVar tyVarAssoc
@@ -98,16 +126,17 @@ functionTypeForallToSpecializedFgType forallSpecialized fgTypePoly =
 --
 -- NOTE: quadratic!!!
 extendFrom
-  :: (Ord tyVar, Show tyVar)
-  => [FunctionTypeNoTyVar]
+  :: forall tyVar meta.
+     (Ord tyVar, Show tyVar, Show meta)
+  => [(meta, FunctionTypeNoTyVar)]
       -- ^ monomorphic functions.
       --
       --   e.g. @Int -> [Bool]@
-  -> [FunctionTypeForall tyVar T.Text]
+  -> [(meta, FunctionTypeForall tyVar T.Text)]
       -- ^ polymorphic functions
       --
       --   e.g. @forall a. [a] -> Maybe a@
-  -> [FunctionTypeNoTyVar]
+  -> [((meta, meta), Either String FunctionTypeNoTyVar)]
       -- ^ a list of: a specialization of one of the polymorphic functions
       --    that takes as argument a type retuned by one of the monomorphic functions
       --
@@ -116,27 +145,39 @@ extendFrom monoFuns polyFuns =
   concat $ foldl' foldFun [] monoFuns
   where
     foldFun
-      :: [[FunctionTypeNoTyVar]]
-      -> FunctionTypeNoTyVar
-      -> [[FunctionTypeNoTyVar]]
-    foldFun accum monoFun =
-      let foldFun' accum' polyFun =
+      :: [[((meta, meta), Either String FunctionTypeNoTyVar)]]
+      -> (meta, FunctionTypeNoTyVar)
+      -> [[((meta, meta), Either String FunctionTypeNoTyVar)]]
+    foldFun accum (monoMeta, monoFun) =
+      let foldFun' accum' (polyMeta, polyFun) =
             case specializeType (ftf_arg polyFun) (functionType_ret monoFun) of
               Right (Just (fgTypePolyArg, env)) ->
                 let mForallSpecialized =
                       specializationEnvToForallSpecialized env (ftf_forall polyFun)
-                    forallSpecialized = fromMaybe (error $ "WIP: not all type variables specialized in " <> show (env, ftf_forall polyFun)) $
+                    eForallSpecialized = maybe
+                      (Left $ unwords
+                        [ "WIP: Not all type variables specialized in"
+                        , "'" <> T.unpack (renderFunctionTypeForallUnqualified polyFun) <> "'."
+                        , "Env: " <> (show . Map.assocs) (Map.mapKeys getTyVar $ renderFgType renderFgTyConUnqualified <$> env) <> "." --
+                        ]
+                      )
+                      Right
                       mForallSpecialized
-                    eFgTypePolyRet =
+                    eMkFgTypePolyRet forallSpecialized =
                       functionTypeForallToSpecializedFgType forallSpecialized (ftf_ret polyFun)
-                    fgTypePolyRet =
-                      either (error . (<> show (forallSpecialized, ftf_ret polyFun)) . show) id eFgTypePolyRet -- WIP
-                in FunctionType
-                  { functionType_arg = fgTypePolyArg
-                  , functionType_ret = fgTypePolyRet
-                  } : accum'
+                    renderError forallSpecialized =
+                      (<> show (forallSpecialized, ftf_ret polyFun)) . show
+                    mkFt fgTypePolyRet' = FunctionType
+                      { functionType_arg = fgTypePolyArg
+                      , functionType_ret = fgTypePolyRet'
+                      }
+                    eFt = do
+                      forallSpecialized <- eForallSpecialized
+                      fgTypePolyRet <- first (renderError forallSpecialized) $ eMkFgTypePolyRet forallSpecialized
+                      Right $ mkFt fgTypePolyRet
+                in ((monoMeta, polyMeta), eFt) : accum'
               Left e ->
-                error e : accum' -- WIP
+                ((monoMeta, polyMeta), Left e) : accum' -- WIP
               _ -> accum'
       in foldl' foldFun' [] polyFuns : accum
 
@@ -338,6 +379,7 @@ specializeType =
 -- ####################################
 
 -- WIP: take `text` type arg?
+-- TODO: rename to `SomeFunctionType`?
 data SomeFunction
   = SomeFunction_Monomorphic (FunctionType (FgType (FgTyCon T.Text)))
   | SomeFunction_Polymorphic (FunctionTypeForall T.Text T.Text)
@@ -347,6 +389,26 @@ instance NFData SomeFunction
 instance A.ToJSON SomeFunction
 instance A.FromJSON SomeFunction
 
+-- WIP
+renderSomeFunctionType
+  :: SomeFunction
+  -> T.Text
+renderSomeFunctionType =
+  renderSomeFunctionTypeGeneric
+    (T.pack . read . show) -- WIP
+    renderFgTyConQualifiedNoPackage
+
+renderSomeFunctionTypeGeneric
+  :: _
+  -> _
+  -> SomeFunction
+  -> T.Text
+renderSomeFunctionTypeGeneric renderTyVar renderTyCon =
+  either
+    (renderFunctionTypeMonoGeneric renderTyCon)
+    (renderFunctionTypeForallGeneric renderTyVar renderTyCon)
+  . someFunctionToEither
+
 eitherToSomeFunction
   :: Either
       (FunctionType (FgType (FgTyCon T.Text)))
@@ -355,14 +417,25 @@ eitherToSomeFunction
 eitherToSomeFunction =
   either SomeFunction_Monomorphic SomeFunction_Polymorphic
 
+someFunctionToEither
+  :: SomeFunction
+  -> Either
+      (FunctionType (FgType (FgTyCon T.Text)))
+      (FunctionTypeForall T.Text T.Text)
+someFunctionToEither = \case
+  SomeFunction_Monomorphic a -> Left a
+  SomeFunction_Polymorphic b -> Right b
+
 someFunctionMonomorphic
-  :: SomeFunction -> Maybe (FunctionType (FgType (FgTyCon T.Text)))
+  :: SomeFunction
+  -> Maybe (FunctionType (FgType (FgTyCon T.Text)))
 someFunctionMonomorphic = \case
   SomeFunction_Monomorphic mono -> Just mono
   SomeFunction_Polymorphic _ -> Nothing
 
 someFunctionPolymorphic
-  :: SomeFunction -> Maybe (FunctionTypeForall T.Text T.Text)
+  :: SomeFunction
+  -> Maybe (FunctionTypeForall T.Text T.Text)
 someFunctionPolymorphic = \case
   SomeFunction_Polymorphic poly -> Just poly
   SomeFunction_Monomorphic _ -> Nothing
