@@ -8,15 +8,18 @@ maintainer:         ben@smart-cactus.org
 copyright:          (c) 2023 Ben Gamari
 
 library
-    exposed-modules:  Json, Types, Compat, Compat.Aeson, Compat.Text
+    exposed-modules:  Json, Types, Types.Forall, Compat, Compat.Aeson, Compat.Text
+                    , Types.Doodle
     build-depends:    base
                     , containers
                     , aeson
                     , unordered-containers
+                    , ordered-containers
                     , text
                     , bytestring
                     , deepseq
                     , utf8-string
+                    , vector
     hs-source-dirs:   src
     default-language: Haskell2010
     ghc-options:      -Wall

@@ -4,5 +4,6 @@ with (import ./pkgs.nix);
     pkgsUnstable.cabal-install
     pkgs.git
     pkgs.zlib # needed for building haskell-language-server
+    pkgs.hlint
   ];
 }

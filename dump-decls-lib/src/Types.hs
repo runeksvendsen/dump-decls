@@ -7,26 +7,28 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE InstanceSigs #-}
 -- |
 -- TODO: Test 'Data.Aeson.encode
 -- TODO: Merge "Types" and "JSON"?
 module Types
 ( -- * 'FgType'
-  FgType(..), renderFgType, renderFgTypeGeneric
+  FgType(..), renderFgType, renderFgTypeGeneric, joinFgType
 , Boxity(..)
 , isBoxed
   -- * 'FgTyCon'
-, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, renderFgTyConQualifiedNoPackage, TyConParseError(..), renderTyConParseError, tgTyConHackageSrcUrl
+, FgTyCon(..), parsePprTyCon, renderFgTyConQualified, renderFgTyConQualifiedNoPackage, renderFgTyConUnqualified, TyConParseError(..), renderTyConParseError, tgTyConHackageSrcUrl
   -- * Rendering 'FgType (FgTyCon T.Text)'
 , renderFgTypeFgTyConUnqualified, renderFgTypeFgTyConQualified, renderFgTypeFgTyConQualifiedNoPackage, fgTypeHackageSrcUrlsHtml
   -- * 'FgPackage'
 , FgPackage(..), parsePackageWithVersion, renderFgPackage
+  -- * 'FunctionType'
+, FunctionType(..), renderFunctionTypeMono, renderFunctionTypeMonoGeneric
   -- * (For testing)
 , splitByEndNonEmpty,
 )
 where
 
-import qualified Data.List.NonEmpty as NE
 import qualified Data.Aeson as A
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
@@ -94,6 +96,12 @@ renderFgTyConQualifiedNoPackage tc =
     , "."
     , fgTyConName tc
     ]
+
+-- TODO: docs
+renderFgTyConUnqualified
+  :: FgTyCon T.Text
+  -> T.Text
+renderFgTyConUnqualified = fgTyConName
 
 -- | Render as Hackage source URL.
 --
@@ -184,6 +192,7 @@ renderTyConParseError e = T.unwords
 --   More will be added later, probably.
 --
 --   Type constructors that have special syntax are handled separately: lists, tuples, unit.
+-- TODO: consider splitting into (1) FgType_TyConApp, and (2) the "special types" list/tuple/unit
 data FgType tycon
   = FgType_TyConApp
     -- ^ A type consisting of (1) a type constructor,
@@ -198,11 +207,15 @@ data FgType tycon
       --  (e.g. 'Int', 'Char', 'Data.Text.Text') and otherwise one type for all type variables
       --  of the type constructor (since we're only looking at the types of functions
       --  exported from a module where a partially applied type constructor is invalid).
-  | FgType_List (FgType tycon)
+  | FgType_List (Maybe (FgType tycon))
   -- ^ A list
-  | FgType_Tuple Boxity (FgType tycon) (NE.NonEmpty (FgType tycon))
-  -- ^ A tuple of size @1 + length nonEmptyList@
-  | FgType_Unit
+  --
+  --   TODO: why 'Maybe'?
+  | FgType_Tuple -- A tuple
+      Boxity
+      Word -- ^ Size
+      [FgType tycon] -- Arguments (not necessarily saturated)
+  | FgType_Unit Boxity -- TODO: Replace 'Boxity' argument with an additional `FgType_UnboxedUnit` constructor?
   -- ^ Unit ('()')
     deriving (Eq, Show, Ord, Foldable, Generic)
 
@@ -211,22 +224,51 @@ instance Functor FgType where
     FgType_TyConApp tycon tyList ->
       FgType_TyConApp (f tycon) (map (fmap f) tyList)
     FgType_List bty ->
-      FgType_List $ fmap f bty
-    FgType_Tuple boxity bty neBty ->
-      FgType_Tuple boxity (fmap f bty) (NE.map (fmap f) neBty)
-    FgType_Unit ->
-      FgType_Unit
+      FgType_List $ fmap (fmap f) bty
+    FgType_Tuple boxity size lst ->
+      FgType_Tuple boxity size (map (fmap f) lst)
+    FgType_Unit b ->
+      FgType_Unit b
 
 instance Traversable FgType where
   traverse f = \case
     FgType_TyConApp tycon tyList ->
       FgType_TyConApp <$> f tycon <*> traverse (traverse f) tyList
     FgType_List bty ->
-      FgType_List <$> traverse f bty
-    FgType_Tuple boxity bty neBty ->
-      FgType_Tuple boxity <$> traverse f bty <*> traverse (traverse f) neBty
-    FgType_Unit ->
-      pure FgType_Unit
+      FgType_List <$> traverse (traverse f) bty
+    FgType_Tuple boxity size lst ->
+      FgType_Tuple boxity size <$> traverse (traverse f) lst
+    FgType_Unit b ->
+      pure $ FgType_Unit b
+
+-- | Turn e.g. @(Either String) Int@ into @Either String Int@ (which are equivalent).
+--
+--   Similar to 'Control.Monad.join' hence the name.
+--
+--   Example:
+--
+-- >>> let nestedFgType = FgType_TyConApp (FgType_TyConApp "Either" [FgType_TyConApp "String" []]) [FgType_TyConApp (FgType_TyConApp "Int" []) []]
+-- >>> let inputRendered = renderFgType (\fgType -> "(" <> renderFgType T.pack fgType <> ")") nestedFgType
+-- >>> let outputRendered = renderFgType T.pack $ joinFgType nestedFgType
+-- >>> inputRendered <> " / " <> outputRendered
+-- "(Either String) (Int) / Either Int String"
+joinFgType
+  :: FgType (FgType tyCon)
+  -> FgType tyCon
+joinFgType =
+  go
+  where
+    go = \case
+      FgType_TyConApp fgType args ->
+        case fgType of
+          FgType_TyConApp tyCon args' ->
+            FgType_TyConApp tyCon (map go args ++ args')
+          other -> other
+      FgType_List mFgType -> FgType_List $ go <$> mFgType
+      FgType_Tuple boxity size lst ->
+        FgType_Tuple boxity size $ go <$> lst
+      FgType_Unit b ->
+        FgType_Unit b
 
 -- | A /boxed/ value is one that's represented by a pointer to the actual data representing the value.
 --   An /unboxed/ value is represented by the actual data (no pointer).
@@ -257,26 +299,27 @@ instance A.FromJSON Boxity where
 instance (A.ToJSON tycon) => A.ToJSON (FgType tycon) where
   toJSON = \case
     FgType_TyConApp tycon tyList -> A.object
-      [("type", A.object [("tycon" :: Compat.Key, A.toJSON tycon), ("tycon_args", A.toJSON tyList)])]
+      [("type", A.object [("tycon" :: Compat.Key, A.toJSON tycon), ("args", A.toJSON tyList)])]
     FgType_List bty -> A.object
       [("list", A.toJSON bty)]
-    FgType_Tuple boxity bty neBty ->
+    FgType_Tuple boxity size args -> -- WIP: size
       let key = case boxity of {Unboxed -> "tuple#"; Boxed -> "tuple"}
       in A.object
-        [(key, A.toJSON $ bty : NE.toList neBty)]
-    FgType_Unit -> A.String "unit"
+        [(key, A.object [("args", A.toJSON args), ("size", A.toJSON size)])]
+    FgType_Unit b -> A.String $ "unit" <> if b == Unboxed then "#" else ""
 
 instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
   parseJSON = \case
-    A.String "unit" -> pure FgType_Unit
+    A.String "unit" -> pure $ FgType_Unit Boxed
+    A.String "unit#" -> pure $ FgType_Unit Boxed
     A.Object o -> parseObject o
     val -> failParse val
     where
       parseObject o = do
-            parseKind o "type" (\o' ->  FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "tycon_args")
+            parseKind o "type" (\o' -> FgType_TyConApp <$> o' A..: "tycon" <*> o' A..: "args")
         <|> parseKind o "list" (pure . FgType_List)
-        <|> parseKind o "tuple" (tupleFromList Boxed)
-        <|> parseKind o "tuple#" (tupleFromList Unboxed)
+        <|> parseKind o "tuple" (tupleFromObject Boxed)
+        <|> parseKind o "tuple#" (tupleFromObject Unboxed)
         <|> failParse (A.Object o)
 
       failParse val = fail $ unwords
@@ -300,9 +343,14 @@ instance (A.FromJSON tycon) => A.FromJSON (FgType tycon) where
       parseKind o keyTxt mkType =
         maybe empty (A.parseJSON >=> mkType) (Compat.lookup keyTxt o)
 
-      tupleFromList boxity = \case
-        ty1:ty2:tyTail ->
-          pure $ FgType_Tuple boxity ty1 (ty2 NE.:| tyTail)
+      tupleFromObject boxity o = do
+        size <- o A..: "size"
+        args <- o A..: "args"
+        tupleFromArgList size boxity args
+
+      tupleFromArgList size boxity = \case
+        args@(_:_:_) ->
+          pure $ FgType_Tuple boxity size args
         other ->
           fail $ "Tuple size must be >= 2 but size is: " <> show (length other)
 
@@ -316,11 +364,15 @@ instance (NFData tycon) => NFData (FgType tycon)
 -- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "Value" []]
 -- "Either String Value"
 --
--- >>> renderFgType id $ FgType_List $ FgType_Tuple Boxed (FgType_TyConApp "Key" []) (NE.singleton $ FgType_TyConApp "Value" [])
+-- >>> renderFgType id $ FgType_List $ Just $ FgType_Tuple Boxed 2 [FgType_TyConApp "Key" [], FgType_TyConApp "Value" []]
 -- "[(Key, Value)]"
 --
--- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "IO" [FgType_Unit]]
+-- >>> renderFgType id $ FgType_TyConApp "Either" [FgType_TyConApp "String" [], FgType_TyConApp "IO" [FgType_Unit Boxed]]
 -- "Either String (IO ())"
+--
+-- Example: unsaturated tuple:
+-- >>> renderFgType id $ FgType_Tuple Boxed 4 [FgType_TyConApp "String" [], FgType_TyConApp "Int" []]
+-- "(,,,) String Int"
 renderFgType
   :: forall tycon.
      (tycon -> T.Text)
@@ -341,7 +393,7 @@ renderFgType = renderFgTypeGeneric id
 -- >>> let either' = FgTyCon "Either" "" (FgPackage "" "")
 -- >>> let text' = FgTyCon "Text" "" (FgPackage "" "")
 -- >>> let io' = FgTyCon "IO" "" (FgPackage "" "")
--- >>> let eitherStringValue = FgType_TyConApp either' [FgType_TyConApp text' [], FgType_TyConApp io' [FgType_Unit]]
+-- >>> let eitherStringValue = FgType_TyConApp either' [FgType_TyConApp text' [], FgType_TyConApp io' [FgType_Unit Boxed]]
 -- >>> renderFgTypeGeneric (\str -> TyConOrText [Left str]) (\tyCon -> TyConOrText [Right $ fgTyConName tyCon]) eitherStringValue
 -- TyConOrText [Right "Either",Left " ",Right "Text",Left " ",Left "(",Right "IO",Left " ",Left "()",Left ")"]
 renderFgTypeGeneric
@@ -364,12 +416,21 @@ renderFgTypeGeneric mkLiteral renderTycon fgType' =
       FgType_TyConApp tycon fgTypeList ->
         (if not (null fgTypeList) && parenthesize then parens else id) $
           mconcat $ Data.List.intersperse (mkLiteral " ") $ renderTycon tycon : map (go True) fgTypeList
-      FgType_List fgType ->
+      FgType_List Nothing ->
+        mkLiteral "[]"
+      FgType_List (Just fgType) ->
         mkLiteral "[" <> go False fgType <> mkLiteral "]"
-      FgType_Tuple boxity fgType fgTypeList ->
-        tupleParens boxity $ mconcat $ Data.List.intersperse (mkLiteral ", ") $ map (go False) (fgType : NE.toList fgTypeList)
-      FgType_Unit ->
+      FgType_Tuple boxity size fgTypeList | length fgTypeList == fromIntegral size ->
+        tupleParens boxity $ mconcat $ Data.List.intersperse (mkLiteral ", ") $ map (go False) fgTypeList
+      FgType_Tuple boxity size fgTypeList -> -- unsaturated or over-saturated
+        mconcat $ Data.List.intersperse (mkLiteral " ") $
+          tupleParens boxity (mconcat $ Data.List.replicate (fromIntegral size - 1) (mkLiteral ","))
+
+          : map (go True) fgTypeList
+      FgType_Unit Boxed ->
         mkLiteral "()"
+      FgType_Unit Unboxed ->
+        tupleParens Unboxed (mkLiteral " ")
   in go False fgType'
 
 -- | Render only the 'fgTyConName' of the 'FgTyCon'.
@@ -377,7 +438,7 @@ renderFgTypeGeneric mkLiteral renderTycon fgType' =
 -- Examples:
 --
 -- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
--- >>> renderFgTypeFgTyConUnqualified $ FgType_TyConApp ioTycon [FgType_Unit]
+-- >>> renderFgTypeFgTyConUnqualified $ FgType_TyConApp ioTycon [FgType_Unit Boxed]
 -- "IO ()"
 renderFgTypeFgTyConUnqualified
   :: FgType (FgTyCon T.Text)
@@ -390,7 +451,7 @@ renderFgTypeFgTyConUnqualified =
 -- Examples:
 --
 -- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
--- >>> renderFgTypeFgTyConQualified $ FgType_TyConApp ioTycon [FgType_Unit]
+-- >>> renderFgTypeFgTyConQualified $ FgType_TyConApp ioTycon [FgType_Unit Boxed]
 -- "ghc-prim-0.10.0:GHC.Types.IO ()"
 renderFgTypeFgTyConQualified
   :: FgType (FgTyCon T.Text)
@@ -403,7 +464,7 @@ renderFgTypeFgTyConQualified =
 -- Examples:
 --
 -- >>> let Right ioTycon = parsePprTyCon "ghc-prim-0.10.0:GHC.Types.IO"
--- >>> renderFgTypeFgTyConQualifiedNoPackage $ FgType_TyConApp ioTycon [FgType_Unit]
+-- >>> renderFgTypeFgTyConQualifiedNoPackage $ FgType_TyConApp ioTycon [FgType_Unit Boxed]
 -- "GHC.Types.IO ()"
 renderFgTypeFgTyConQualifiedNoPackage
   :: FgType (FgTyCon T.Text)
@@ -477,8 +538,12 @@ parsePackageWithVersion packageAndVersion = do
 parsePprTyCon :: T.Text -> Either String (FgTyCon T.Text)
 parsePprTyCon str = do
   (packageAndVersion, fqn) <- case T.splitOn ":" str of
-    [packageAndVersion, fqn] -> pure (packageAndVersion, fqn)
-    _ -> Left $ "missing colon in " <> show (T.unpack str)
+    packageAndVersion : fqnLst@(_ : _) ->
+      -- NOTE: if the type constructor name contains one or more colons, then we need to restore these after splitting on the colon that follows the package name/version
+      let fqn = mconcat $ Data.List.intersperse ":" fqnLst
+      in pure (packageAndVersion, fqn)
+    _ ->
+      Left $ "missing colon in " <> show (T.unpack str)
   package <- parsePackageWithVersion packageAndVersion
   (moduleName, name) <-
     splitByEndNonEmpty "invalid fully qualified identifier" '.' fqn
@@ -487,6 +552,32 @@ parsePprTyCon str = do
     , fgTyConModule = moduleName
     , fgTyConPackage = package
     }
+
+data FunctionType value = FunctionType
+  { functionType_arg :: value
+  , functionType_ret :: value
+  } deriving (Eq, Show, Ord, Functor, Foldable, Generic)
+
+instance A.ToJSON value => A.ToJSON (FunctionType value)
+instance A.FromJSON value => A.FromJSON (FunctionType value)
+instance NFData value => NFData (FunctionType value)
+
+instance Traversable FunctionType where
+  traverse f ft =
+    FunctionType <$> f (functionType_arg ft) <*> f (functionType_ret ft)
+
+renderFunctionTypeMono :: FunctionType (FgType (FgTyCon T.Text)) -> T.Text
+renderFunctionTypeMono =
+  renderFunctionTypeMonoGeneric renderFgTyConQualified
+
+renderFunctionTypeMonoGeneric
+  :: (FgTyCon T.Text -> T.Text)
+  -> FunctionType (FgType (FgTyCon T.Text)) -> T.Text
+renderFunctionTypeMonoGeneric renderTyCon ft = T.unwords
+  [ renderFgType renderTyCon (functionType_arg ft)
+  , "->"
+  , renderFgType renderTyCon (functionType_ret ft)
+  ]
 
 -- | Split string by last occurence of character.
 --   Return pair of non-empty text strings before and after character (neither string includes the character).

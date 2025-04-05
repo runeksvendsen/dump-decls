@@ -4,18 +4,19 @@
 {-# HLINT ignore "Move guards forward" #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Exe
 ( main
+, StdoutJsonFormat
 )
 where
 
 import Types
 import qualified Json
+import Types.Doodle -- TODO
 import GHC hiding (moduleName)
-import qualified GHC.Paths
-import GHC.Core.Type (splitFunTys, expandTypeSynonyms)
-import GHC.Driver.Ppr (showSDocForUser)
-import GHC.Unit.State (lookupUnitId, lookupPackageName)
+import GHC.Core.Type (splitFunTys, expandTypeSynonyms, isLiftedTypeKind, isConstraintKind, returnsConstraintKind, typeKind)
+import GHC.Unit.State (lookupUnitId, lookupPackageName, pprWithUnitState)
 import GHC.Unit.Info (UnitInfo, unitExposedModules, unitId, PackageName(..))
 import GHC.Unit.Types (UnitId)
 import GHC.Data.FastString (fsLit)
@@ -24,14 +25,13 @@ import GHC.Utils.Outputable hiding (sep, (<>))
 import GHC.Types.TyThing (tyThingParent_maybe)
 import GHC.Types.Name (nameOccName, getSrcLoc)
 import GHC.Types.Name.Occurrence (OccName)
-import GHC.Types.Var (varName, varType)
+import GHC.Types.Var (varName, varType, VarBndr (Bndr), tyVarKind)
 import Data.Function (on)
 import Data.List (sortBy)
 import System.Environment (getArgs)
-import Control.Monad (forM, forM_, unless)
+import Control.Monad (forM, forM_)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import qualified Data.List.NonEmpty as NE
 import qualified System.Exit as Exit
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import GHC.IO.Unsafe (unsafeInterleaveIO)
@@ -41,36 +41,37 @@ import qualified Control.Exception as Ex
 import GHC.Core.Multiplicity (scaledThing)
 import qualified Control.Monad.Catch
 import qualified Control.Exception
-import GHC.Core.TyCo.Rep (Type(..))
+import GHC.Core.TyCo.Rep (Type(..), KindOrType)
 import GHC.Core.TyCon (isUnboxedTupleTyCon, isBoxedTupleTyCon, isTupleTyCon)
 import GHC.Builtin.Names (listTyConKey, getUnique)
 import qualified Data.Text as T
-import Data.Bifunctor (bimap, first)
-import GHC.Stack (HasCallStack)
-import Data.Functor.Identity (Identity(Identity))
+import Data.Bifunctor (first)
+import qualified Types.Forall as Forall
+import Data.Either (fromLeft)
+import Data.Functor ((<&>), void)
+import qualified Data.Text.IO as TIO
+import qualified GHC.Driver.Session
+import qualified Types.Doodle as Doodle
+import Control.Monad.Trans.Except (ExceptT, throwE, except, withExceptT, Except, runExcept)
+
+-- | The output printed to stdout can be parsed as JSON into this data type.
+--
+--   Using e.g. @Data.Aeson.decode :: Data.ByteString.Lazy.ByteString -> Maybe StdoutJsonFormat@
+type StdoutJsonFormat = [Json.DeclarationMapJson T.Text]
 
 main :: IO ()
 main = do
-  pkg_names <- getArgs
-  let runGhc' :: Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
-      runGhc' action = reallyCatch $ runGhc (Just GHC.Paths.libdir) action
-  pprFun <- case pkg_names of
+  args <- getArgs
+  let runGhc' :: FilePath -> Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
+      runGhc' libdir action = reallyCatch $ runGhc (Just libdir) action
+  (pprFun, ghcLibDir, pkg_names) <- case args of
     [] -> Exit.die "Missing argument(s): one or more packages"
-    first_package_name : _ -> runGhc' (getPprFun first_package_name) >>= either (fail . show) pure
+    ghcLibDir : pkg_names@(first_package_name : _) ->
+      runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\pprFun -> pure $ (pprFun, ghcLibDir, pkg_names))
   lst <- forM pkg_names $ \pkg_nm -> do
-    unsafeInterleaveIO $ runGhc' (getDefinitions pprFun pkg_nm) >>= logErrors
-  let declarationMapJsonList = map (declarationMapToJson pprFun) (catMaybes lst)
-  forM_ declarationMapJsonList $ \declarationMapJson -> do
-    let errors = Map.assocs $ Map.assocs <$> Json.moduleDeclarations_mapFail (Json.declarationMapJson_moduleDeclarations declarationMapJson)
-    forM_ errors $ \(modName, pkgErrs) ->
-      forM_ pkgErrs $ \(defnName, err) ->
-        logError $ T.unpack $ T.unwords
-          [ "WARNING:"
-          , T.pack $ show (tyConParseErrorInput err)
-          , "failed to parse" <> "."
-          , renderTyConParseError err
-          ]
-  Json.streamPrintJsonList declarationMapJsonList
+    unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
+  let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds)) (catMaybes lst)
+  Json.streamPrintJsonList (declarationMapJsonList :: StdoutJsonFormat)
   where
     reallyCatch :: IO a -> IO (Either Control.Exception.SomeException a)
     reallyCatch ioAction =
@@ -81,8 +82,8 @@ main = do
             Just eAsync -> logError ("Caught async exception: " ++ show eAsync) >> Ex.throwIO eAsync
 
     logErrors
-      :: Either Control.Monad.Catch.SomeException (Maybe DeclarationMap)
-      -> IO (Maybe DeclarationMap)
+      :: Either Control.Monad.Catch.SomeException (Maybe (DeclarationMap ty))
+      -> IO (Maybe (DeclarationMap ty))
     logErrors = \case
       Left ex -> logError (show ex) >> pure Nothing
       Right res -> pure res
@@ -113,9 +114,16 @@ getPprFun pkg_nm = do
   dflags <- setDFlags pkg_nm
   unit_state <- hsc_units <$> getSession
   name_ppr_ctx <- GHC.getNamePprCtx
-  pure $ T.pack . showSDocForUser dflags unit_state name_ppr_ctx
+  pure $ T.pack . showSDocForUser' dflags unit_state name_ppr_ctx
+  where
+    showSDocForUser' dflags unit_state name_ppr_ctx doc =
+      let sty  = mkUserStyle name_ppr_ctx AllTheWay
+          doc' = GHC.Unit.State.pprWithUnitState unit_state doc
+          sDocContext = GHC.Driver.Session.initSDocContext dflags sty
+          blahTodo sDocContext' = sDocContext'{sdocSuppressVarKinds = True, sdocPrintExplicitKinds = False, sdocStarIsType = True}
+      in renderWithContext (blahTodo sDocContext) doc'
 
-getDefinitions :: (SDoc -> T.Text) -> String -> Ghc (Maybe DeclarationMap)
+getDefinitions :: (SDoc -> T.Text) -> String -> Ghc (Maybe (DeclarationMap (Either FgError SomeFunction)))
 getDefinitions pprFun pkg_nm = do
   _ <- setDFlags pkg_nm
   unit_state <- hsc_units <$> getSession
@@ -125,11 +133,41 @@ getDefinitions pprFun pkg_nm = do
   unit_info <- case lookupUnitId unit_state unit_id of
     Just unit_info -> return unit_info
     Nothing -> fail "unknown package"
+  liftIO $ IO.hPutStrLn IO.stderr $ "   getDefinitions " ++ pkg_nm
   mDefinitions <- reportUnitDecls pprFun unit_info
-  liftIO $ IO.hPutStrLn IO.stderr $ "getDefinitions " ++ pkg_nm
-  pure $ DeclarationMap unit_id <$> mDefinitions
+  let f :: Map ModuleName FunctionMap
+        -> Map ModuleName (Map Name (Either FgError Doodle.SomeFunction))
+      f = fmap (fmap (fmap eitherToSomeFunction . runExcept))
+  pure $ DeclarationMap unit_id . f <$> mDefinitions
 
-reportUnitDecls :: (SDoc -> T.Text) -> UnitInfo -> Ghc (Maybe (Map ModuleName (Map Name (Json.FunctionType Type))))
+ppFunctionMap
+  :: (SDoc -> T.Text)
+  -> FunctionMap
+  -> [T.Text]
+ppFunctionMap pprFun fm = catMaybes $
+   -- WIP: ignore non-forall functions for now
+  Map.toList fm <&> \(name, fun) ->
+    either (const Nothing) (either (const Nothing) (ppTodo name)) (runExcept fun)
+  where
+    ppTodo name !fun = Just $
+      T.unwords
+        [ pprFun (ppr name)
+        , "::"
+        , renderFunctionTypeForallGeneric id renderFgTyConUnqualified fun
+        ]
+
+type FunctionMap =
+  Map
+    Name
+    (Except
+      FgError
+      (Either
+        (FunctionType (FgType (FgTyCon T.Text)))
+        (FunctionTypeForall T.Text T.Text)
+      )
+    )
+
+reportUnitDecls :: (SDoc -> T.Text) -> UnitInfo -> Ghc (Maybe (Map ModuleName FunctionMap))
 reportUnitDecls pprFun unit_info = do
     let exposed :: [ModuleName]
         exposed = map fst (unitExposedModules unit_info)
@@ -142,7 +180,11 @@ reportUnitDecls pprFun unit_info = do
       then Nothing
       else Just map'
 
-reportModuleDecls :: (SDoc -> T.Text) -> UnitId -> ModuleName -> Ghc (Map Name (Json.FunctionType Type))
+reportModuleDecls
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> ModuleName
+  -> Ghc FunctionMap
 reportModuleDecls pprFun unit_id modl_nm = do
     modl <- GHC.lookupQualifiedModule (OtherPkg unit_id) modl_nm
     mb_mod_info <- GHC.getModuleInfo modl
@@ -161,12 +203,12 @@ reportModuleDecls pprFun unit_id modl_nm = do
 
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, Json.FunctionType (scaledThing arg) res)
+            [ (varName _id, blah)
             | Just thing <- things
             , AnId _id <- [thing]
-            , (arg, res) <- case splitFunTys $ varType _id of -- is it a function with exactly one argument?
-                ([arg], res) -> [(arg, res)]
-                (_, _) -> []
+            , Just blah <-
+                let ty = expandTypeSynonyms $ varType _id -- NOTE: we need to expand type synonyms because two types are considered equal only if their 'FgType' representations are equal (==). And a type synonym is a distinct 'TyConApp', which means it'll become a distinct 'FgType'.
+                in [parseType pprFun unit_id (modl_nm, varName _id) ty]
             , case tyThingParent_maybe thing of
                 Just parent
                   | is_exported (getOccName parent) -> False
@@ -174,23 +216,107 @@ reportModuleDecls pprFun unit_id modl_nm = do
             ]
     pure $ Map.fromList contents
 
-data DeclarationMap = DeclarationMap
+-- TODO: postpone conversion of GHC 'Type' to 'FgType'? Or just use 'funtionTypeExpandAndConvertToFgType' in here?
+parseType
+  :: forall m.
+     (Traversable m, Monad m)
+  => (SDoc -> T.Text)
+  -> UnitId
+  -> (ModuleName, Name)
+  -> Type
+  -> Maybe
+      (ExceptT
+        FgError
+        m
+        (Either
+            (FunctionType (FgType (FgTyCon T.Text))) -- only concrete types
+            (FunctionTypeForall T.Text T.Text) -- both concrete types and type variables
+        )
+      )
+    -- ^ 'Nothing': type not supported
+    --   'Just': type supported
+parseType pprFun package dbg tyInit = sequenceA $
+  case splitFunTys tyInit of
+    ([], res) ->
+      case res of
+        ForAllTy bndr ty' | isTypeKind bndr -> do
+          forall_ <- parseForall Nothing bndr
+          fmap Right <$> goForall forall_ ty'
+        _ -> pure Nothing
+    ([_], _) ->
+      fmap Left <$> goSimple tyInit
+    _ -> pure Nothing
+  where
+    goForall
+      :: Forall.Forall T.Text
+      -> Type
+      -> ExceptT
+          FgError
+          m
+          (Maybe (FunctionTypeForall T.Text T.Text))
+    goForall forall_ ty =
+      case splitFunTys ty of
+        ([], res) ->
+          case res of
+            ForAllTy bndr ty' | isTypeKind bndr -> do
+              forall_' <- parseForall (Just forall_) bndr
+              goForall forall_' ty'
+            _ -> pure Nothing
+        ([arg], res) | not (returnsConstraintKind $ GHC.Core.Type.typeKind (scaledThing arg)) -> do
+            let mArgRes = do
+                  arg' <- toFgType' pprFun $ scaledThing arg
+                  res' <- toFgType' pprFun res
+                  Just (arg', res')
+            case mArgRes of
+              Just (arg', res') -> do
+                arg'' <- except $ traverse (tyConOrTyVarTODO pprFun package dbg forall_) arg'
+                res'' <- except $ traverse (tyConOrTyVarTODO pprFun package dbg forall_) res'
+                pure $ Just $ mkFunctionTypeForall forall_ arg'' res''
+              Nothing -> pure Nothing
+        (_, _) -> pure Nothing
+
+    goSimple ty =
+      case splitFunTys ty of
+        ([arg], res) -> do
+          let mArgRes = do
+                arg' <- toFgType pprFun $ scaledThing arg
+                res' <- toFgType pprFun res
+                Just (arg', res')
+          case mArgRes of
+            Just (arg', res') -> withExceptT FgError_TyCon $ do
+              arg'' <- except $ traverse (tyConToFgTyCon pprFun package dbg) arg'
+              res'' <- except $ traverse (tyConToFgTyCon pprFun package dbg) res'
+              pure $ Just $ FunctionType arg'' res''
+            Nothing -> pure Nothing
+        _ -> pure Nothing
+
+    parseForall mForall (Bndr tyCoVar _) =
+      let mkForall = maybe (Right . Forall.singleton) (\forall' -> (`Forall.appendTyVar` forall')) mForall
+          tyVarName = pprFun (ppr tyCoVar) -- WIP: correct?
+          eForall = mkForall tyVarName
+      in either (throwE . FgError_Forall) pure eForall -- WIP: don't throw exception
+
+    -- is kind *
+    isTypeKind (Bndr tyVar _) =
+      isLiftedTypeKind (tyVarKind tyVar) && not (isConstraintKind $ tyVarKind tyVar)
+
+data DeclarationMap ty = DeclarationMap
   { declarationMap_package :: UnitId
-  , declarationMap_moduleDeclarations :: Map ModuleName (Map Name (Json.FunctionType Type))
+  , declarationMap_moduleDeclarations :: Map ModuleName (Map Name ty)
     -- ^ -- A map from a module name to the declarations in that module
   }
 
 declarationMapToJson
   :: (SDoc -> T.Text)
-  -> DeclarationMap
+  -> DeclarationMap (Either FgError SomeFunction)
   -> Json.DeclarationMapJson T.Text
 declarationMapToJson pprFun dm =
   let
-    eitherMap :: Map T.Text (Map T.Text (Either TyConParseError (Json.TypeInfo (FgType (FgTyCon T.Text)))))
+    eitherMap :: Map T.Text (Map T.Text (Either FgError SomeFunction))
     eitherMap = mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
       ( fullyQualify' modName
-      , mapMapMaybe nameMap $ \(name, functionType) ->
-          (noQualify' name, funtionTypeToTypeInfo (modName, name) functionType)
+      , mapMapMaybe nameMap $ \(name, either') ->
+          (noQualify' name, Just either') -- WIP: no Maybe
       )
 
   in Json.DeclarationMapJson
@@ -217,41 +343,57 @@ declarationMapToJson pprFun dm =
     mapMapMaybe :: Ord k' => Map k a -> ((k, a) -> (k', Maybe a')) -> Map k' a'
     mapMapMaybe map' f = Map.fromList . map (fmap fromJust) . filter (isJust . snd) . map f . Map.toList $ map'
 
-    funtionTypeToTypeInfo
-      :: (ModuleName, Name) -- for debugging purposes
-      -> Json.FunctionType Type
-      -> Maybe (Either TyConParseError (Json.TypeInfo (FgType (FgTyCon T.Text))))
-    funtionTypeToTypeInfo dbg funType = do
-      funTyExpanded <- traverse (toFgType . expandTypeSynonyms) funType
-      funTy <- traverse toFgType funType
-      let funTypeInfo = Json.TypeInfo
-            { Json.typeInfo_expanded = if funTyExpanded == funTy then Nothing else Just funTyExpanded
-            , Json.typeInfo_unexpanded = funTy
-            }
-      pure $ traverse (traverse (tyConToFgTyCon dbg)) funTypeInfo
-
     fullyQualify', noQualify' :: Outputable a => a -> T.Text
     fullyQualify' = pprFun . fullyQualify
     noQualify' = pprFun . noQualify
 
-    tyConToFgTyCon
-      :: (ModuleName, Name) -- for debugging purposes
-      -> TyCon
-      -> Either TyConParseError (FgTyCon T.Text)
-    tyConToFgTyCon (modName, functionName) tyCon =
-      first mkTyConParseError . parsePprTyCon $ tyConPpr
-      where
-        tyConPpr = fullyQualify' tyCon
+tyConOrTyVarTODO
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> (ModuleName, Name) -- for debugging purposes
+  -> Forall.Forall T.Text
+  -> Either TyCon TyVar
+  -> Either FgError (Either (FgTyCon T.Text) (Forall.TyVar T.Text))
+tyConOrTyVarTODO pprFun package dbg forall_ =
+  either
+    (fmap Left . first FgError_TyCon . tyConToFgTyCon pprFun package dbg)
+    (fmap Right . first FgError_Forall . tyVarToTODO pprFun package dbg forall_)
 
-        fullyQualify' = pprFun . fullyQualify
+tyVarToTODO
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> (ModuleName, Name) -- for debugging purposes
+  -> Forall.Forall T.Text
+  -> TyVar
+  -> Either (Forall.ForallError T.Text) (Forall.TyVar T.Text)
+tyVarToTODO pprFun package dbg forall_ tyVar =
+  let getTyVarName = pprFun . ppr -- WIP: correct?
+  in Forall.lookupTyVar (getTyVarName tyVar) forall_
 
-        mkTyConParseError e = TyConParseError
-          { tyConParseErrorMsg = e
-          , tyConParseErrorInput = tyConPpr
-          , tyConParseErrorFunctionName = pprFun (ppr functionName)
-          , tyConParseErrorPackage = parsePackageFromUnitId pprFun package
-          , tyConParseErrorSrcLoc = pprFun (ppr $ getSrcLoc tyCon)
-          }
+tyConToFgTyCon
+  :: (SDoc -> T.Text)
+  -> UnitId
+  -> (ModuleName, Name) -- for debugging purposes
+  -> TyCon
+  -> Either TyConParseError (FgTyCon T.Text)
+tyConToFgTyCon pprFun package (modName, functionName) tyCon =
+  first mkTyConParseError . parsePprTyCon $ tyConPpr
+  where
+    tyConPpr = fullyQualify' tyCon
+
+    fullyQualify' = pprFun . fullyQualify
+
+    mkTyConParseError e = TyConParseError
+      { tyConParseErrorMsg = e
+      , tyConParseErrorInput = tyConPpr
+      , tyConParseErrorFunctionName = pprFun (ppr functionName)
+      , tyConParseErrorPackage = parsePackageFromUnitId pprFun package
+      , tyConParseErrorSrcLoc = pprFun (ppr $ getSrcLoc tyCon)
+      }
+
+pprSuppressVarKinds :: SDoc -> SDoc
+pprSuppressVarKinds =
+  updSDocContext (\sDocContext -> sDocContext{sdocSuppressVarKinds = True, sdocPrintExplicitKinds = False})
 
 fullyQualify :: Outputable a => a -> SDoc
 fullyQualify =
@@ -278,27 +420,87 @@ noQualify =
         , queryPromotionTick = const True
         }
 
--- | Convert a 'Type' to a 'FgType'. Only 'TyConApp' is supported currently.
-toFgType :: Type -> Maybe (FgType TyCon)
-toFgType !ty = case ty of
-  TyConApp tyCon [] | isTupleTyCon tyCon -> do -- unit
-      pure FgType_Unit
-  TyConApp tyCon (ty1:ty2:tyTail) | Just boxity <- tupleBoxity tyCon -> do -- tuple (of size >= 2)
-      ty1' <- toFgType ty1
-      tyTail' <- mapM toFgType (ty2 NE.:| tyTail)
-      pure $ FgType_Tuple boxity ty1' tyTail'
-  TyConApp tyCon [ty1] | getUnique tyCon == listTyConKey -> do -- list
-    ty1' <- toFgType ty1
-    pure $ FgType_List ty1'
-  TyConApp tyCon tyList -> do -- neither a tuple nor a list
-    tyList' <- mapM toFgType tyList
-    pure $ FgType_TyConApp tyCon tyList'
-  _ -> Nothing
+-- | Convert a 'TyConApp' to a 'FgType TyCon'
+tyConAppToFgTypeTyCon
+  :: (SDoc -> T.Text)
+  -> (KindOrType -> Maybe (FgType (Either TyCon a)))
+     -- ^ Recursive case
+     --
+     -- TODO: why 'Maybe' and 'Either'?
+  -> TyCon
+     -- ^ First argument to 'TyConApp'
+  -> [KindOrType]
+     -- ^ Second argument to 'TyConApp'
+  -> Maybe (FgType (Either TyCon a))
+tyConAppToFgTypeTyCon pprFun recurse tyCon = \case
+  [] | isTupleTyCon tyCon, Just boxity <- tupleBoxity -> do -- unit
+      pure $ FgType_Unit boxity
+  args@(_:_:_) | Just boxity <- tupleBoxity -> do -- tuple (of size >= 2)
+      args' <- mapM recurse args
+      pure $ FgType_Tuple boxity (fromIntegral $ tyConArity tyCon) args'
+  mTy | getUnique tyCon == listTyConKey -> do -- list
+    case mTy of
+      [] -> pure $ FgType_List Nothing
+      [ty1] -> do
+        ty1' <- recurse ty1
+        pure $ FgType_List (Just ty1')
+      _ -> Nothing
+  tyList -> do -- neither a tuple nor a list
+    tyList' <- mapM recurse tyList
+    pure $ FgType_TyConApp (Left tyCon) tyList'
   where
-    tupleBoxity tyCon
+    tupleBoxity
       | isUnboxedTupleTyCon tyCon = Just Types.Unboxed
       | isBoxedTupleTyCon tyCon = Just Types.Boxed
       | otherwise = Nothing
+
+-- | Convert a 'Type' to a 'FgType'. Only 'TyConApp' is supported currently.
+toFgType :: (SDoc -> T.Text) -> Type -> Maybe (FgType TyCon)
+toFgType pprFun =
+  go
+  where
+    go = \case
+      TyConApp tyCon tyConList ->
+        fmap (fromLeft (error "toFgType: impossible")) <$>
+          tyConAppToFgTypeTyCon pprFun (fmap (fmap Left) . go) tyCon tyConList
+      _ -> Nothing
+
+toFgType'
+  :: (SDoc -> T.Text)
+  -> Type
+  -> Maybe (FgType (Either TyCon TyVar))
+toFgType' pprFun ty =
+  go ty
+  where
+    go = \case
+      TyConApp tyCon tyConList ->
+        tyConAppToFgTypeTyCon pprFun go tyCon tyConList
+      TyVarTy tyVar ->
+        pure $ FgType_TyConApp (Right tyVar) []
+      appTy@AppTy{} -> do
+        -- Flatten nested AppTy's. Ie. converting nested AppTy's into (1) the "function" type variable and (2) the "argument" type variable(s)/constructor(s).
+        -- E.g. from "((f a) b) c" to "FgType_TyConApp (Right f) [a, b, c]"
+        let goAppTy
+              :: [FgType (Either TyCon TyVar)] -- "argument" accumulator. accumulates the second argument to "AppTy" (ie. the "argument" type).
+              -> Type -- the first argument to 'AppTy' (ie. the "function" type variable)
+              -> Maybe (FgType (Either TyCon TyVar))
+            goAppTy acc = \case
+              tyVarTy@TyVarTy{} -> go tyVarTy
+              AppTy fun2 arg2 -> do
+                arg2' <- go arg2
+                goAppTy (arg2' : acc) fun2
+              TyConApp{} ->
+                -- 'TyConApp' is not allowed as first argument to 'AppTy'.
+                -- See docs: https://hackage.haskell.org/package/ghc-9.6.1/docs/GHC-Core-TyCo-Rep.html#v:AppTy
+                error $ unwords
+                  [ "Unexpected TyConApp as first argument to AppTy:"
+                  , (T.unpack . pprFun . ppr $ appTy) <> "."
+                  , "Outer type:"
+                  , T.unpack . pprFun . ppr $ ty
+                  ]
+              _ -> Nothing
+        goAppTy [] appTy
+      _ -> Nothing
 
 parsePackageFromUnitId
   :: (SDoc -> T.Text)
