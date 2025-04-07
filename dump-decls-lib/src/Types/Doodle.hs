@@ -14,7 +14,7 @@ module Types.Doodle
 , FunctionTypeForall
 , specializeType
 , mkFunctionTypeForall
-, extendFrom
+, extendMonoType
   -- * SomeFunction
 , SomeFunction(..)
 , eitherToSomeFunction
@@ -23,7 +23,7 @@ module Types.Doodle
   -- * `FgError`
 , FgError(..)
 , renderFgError
-, renderFunctionTypeForallGeneric
+, renderFunctionTypeForallGeneric, renderFunctionTypeForallUnqualified
 , renderSomeFunctionType
 )
 where
@@ -122,13 +122,13 @@ functionTypeForallToSpecializedFgType forallSpecialized fgTypePoly =
     )
     fgTypePoly
 
--- | Extend from the return type of the monomorphic function
+-- | Extend from the monomorhic type
 --
 -- NOTE: quadratic!!!
-extendFrom
+extendMonoType
   :: forall tyVar meta.
      (Ord tyVar, Show tyVar, Show meta)
-  => [(meta, FunctionTypeNoTyVar)]
+  => [(meta, FgType (FgTyCon T.Text))]
       -- ^ monomorphic functions.
       --
       --   e.g. @Int -> [Bool]@
@@ -141,16 +141,16 @@ extendFrom
       --    that takes as argument a type retuned by one of the monomorphic functions
       --
       --  e.g. @[Bool] -> Maybe Bool@
-extendFrom monoFuns polyFuns =
-  concat $ foldl' foldFun [] monoFuns
+extendMonoType monoTypes polyFuns =
+  concat $ foldl' foldFun [] monoTypes
   where
     foldFun
       :: [[((meta, meta), Either String FunctionTypeNoTyVar)]]
-      -> (meta, FunctionTypeNoTyVar)
+      -> (meta, FgType (FgTyCon T.Text))
       -> [[((meta, meta), Either String FunctionTypeNoTyVar)]]
-    foldFun accum (monoMeta, monoFun) =
+    foldFun accum (monoMeta, monoType) =
       let foldFun' accum' (polyMeta, polyFun) =
-            case specializeType (ftf_arg polyFun) (functionType_ret monoFun) of
+            case specializeType (ftf_arg polyFun) monoType of
               Right (Just (fgTypePolyArg, env)) ->
                 let mForallSpecialized =
                       specializationEnvToForallSpecialized env (ftf_forall polyFun)
