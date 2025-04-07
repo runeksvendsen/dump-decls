@@ -22,7 +22,7 @@ import qualified Data.Aeson as A
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Map as Map
-import Types (TyConParseError, FgPackage)
+import Types (FgPackage)
 import qualified Types.Doodle as Doodle
 
 streamPrintJsonList
