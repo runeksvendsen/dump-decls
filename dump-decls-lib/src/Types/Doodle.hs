@@ -14,7 +14,7 @@ module Types.Doodle
 , FunctionTypeForall
 , specializeType
 , mkFunctionTypeForall
-, extendMonoType
+, extendFrom, extendTo
   -- * SomeFunction
 , SomeFunction(..)
 , eitherToSomeFunction
@@ -122,13 +122,13 @@ functionTypeForallToSpecializedFgType forallSpecialized fgTypePoly =
     )
     fgTypePoly
 
--- | Extend from the monomorhic type
+--- | TODO
 --
 -- NOTE: quadratic!!!
-extendMonoType
+extendFrom
   :: forall tyVar meta.
      (Ord tyVar, Show tyVar, Show meta)
-  => [(meta, FgType (FgTyCon T.Text))]
+  => [(meta, FunctionTypeNoTyVar)]
       -- ^ monomorphic functions.
       --
       --   e.g. @Int -> [Bool]@
@@ -141,16 +141,62 @@ extendMonoType
       --    that takes as argument a type retuned by one of the monomorphic functions
       --
       --  e.g. @[Bool] -> Maybe Bool@
-extendMonoType monoTypes polyFuns =
-  concat $ foldl' foldFun [] monoTypes
+extendFrom =
+  extendMonoTypeGeneric functionType_ret ftf_arg
+
+--- | TODO
+--
+-- NOTE: quadratic!!!
+extendTo
+  :: forall tyVar meta.
+     (Ord tyVar, Show tyVar, Show meta)
+  => [(meta, FunctionTypeNoTyVar)]
+      -- ^ monomorphic functions.
+      --
+      --   e.g. @Int -> [Bool]@
+  -> [(meta, FunctionTypeForall tyVar T.Text)]
+      -- ^ polymorphic functions
+      --
+      --   e.g. @forall a. [a] -> Maybe a@
+  -> [((meta, meta), Either String FunctionTypeNoTyVar)]
+      -- ^ a list of: a specialization of one of the polymorphic functions
+      --    that takes as argument a type retuned by one of the monomorphic functions
+      --
+      --  e.g. @[Bool] -> Maybe Bool@
+extendTo  =
+  extendMonoTypeGeneric functionType_arg ftf_ret
+
+-- | Extend monomorphic functions with polymorphic functions
+extendMonoTypeGeneric
+  :: forall tyVar meta.
+     (Ord tyVar, Show tyVar, Show meta)
+  => (FunctionTypeNoTyVar -> FgType (FgTyCon T.Text))
+     -- ^ TODO
+  -> (FunctionTypeForall tyVar T.Text -> FgType (Either (FgTyCon T.Text) (TyVar tyVar)))
+     -- ^ TODO
+  -> [(meta, FunctionTypeNoTyVar)]
+      -- ^ monomorphic functions.
+      --
+      --   e.g. @Int -> [Bool]@
+  -> [(meta, FunctionTypeForall tyVar T.Text)]
+      -- ^ polymorphic functions
+      --
+      --   e.g. @forall a. [a] -> Maybe a@
+  -> [((meta, meta), Either String FunctionTypeNoTyVar)]
+      -- ^ a list of: a specialization of one of the polymorphic functions
+      --    that takes as argument a type retuned by one of the monomorphic functions
+      --
+      --  e.g. @[Bool] -> Maybe Bool@
+extendMonoTypeGeneric getMonoType getPolyType monoFuns polyFuns =
+  concat $ foldl' foldFun [] monoFuns
   where
     foldFun
       :: [[((meta, meta), Either String FunctionTypeNoTyVar)]]
-      -> (meta, FgType (FgTyCon T.Text))
+      -> (meta, FunctionTypeNoTyVar)
       -> [[((meta, meta), Either String FunctionTypeNoTyVar)]]
-    foldFun accum (monoMeta, monoType) =
+    foldFun accum (monoMeta, monoFun) =
       let foldFun' accum' (polyMeta, polyFun) =
-            case specializeType (ftf_arg polyFun) monoType of
+            case specializeType (getPolyType polyFun) (getMonoType monoFun) of
               Right (Just (fgTypePolyArg, env)) ->
                 let mForallSpecialized =
                       specializationEnvToForallSpecialized env (ftf_forall polyFun)
