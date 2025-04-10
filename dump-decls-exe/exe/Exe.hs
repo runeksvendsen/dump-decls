@@ -53,6 +53,10 @@ import qualified Data.Text.IO as TIO
 import qualified GHC.Driver.Session
 import qualified Types.Doodle as Doodle
 import Control.Monad.Trans.Except (ExceptT, throwE, except, withExceptT, Except, runExcept)
+import Debug.Trace (trace)
+import qualified Types.FunctionInfo
+import Types.FunctionInfo (FunctionInfo)
+import qualified GHC.Types.Unique
 
 -- | The output printed to stdout can be parsed as JSON into this data type.
 --
@@ -68,22 +72,29 @@ main = do
     [] -> Exit.die "Missing argument(s): one or more packages"
     ghcLibDir : pkg_names@(first_package_name : _) ->
       runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\pprFun -> pure $ (pprFun, ghcLibDir, pkg_names))
-  lst <- forM pkg_names $ \pkg_nm -> do
-    unsafeInterleaveIO $ runGhc' ghcLibDir (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
+  let throwError = either
+        (\err -> logError (show err) >> Control.Exception.throwIO err)
+        pure
+  lst <- (throwError =<<) $ runGhc' ghcLibDir $ forM pkg_names $ \pkg_nm -> do
+    reallyCatch (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
   let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds)) (catMaybes lst)
   Json.streamPrintJsonList (declarationMapJsonList :: StdoutJsonFormat)
   where
-    reallyCatch :: IO a -> IO (Either Control.Exception.SomeException a)
-    reallyCatch ioAction =
-      Control.Exception.catch
-        (Right <$> (ioAction >>= Control.Exception.evaluate))
+    reallyCatch
+      :: (MonadIO m, Control.Monad.Catch.MonadCatch m)
+      => m a
+      -> m (Either Control.Exception.SomeException a)
+    reallyCatch action =
+      Control.Monad.Catch.catch
+        (action >>= (liftIO . Control.Exception.evaluate) . Right)
         $ \e -> case Control.Exception.fromException e :: Maybe Ex.AsyncException of
             Nothing -> pure . Left $ e
-            Just eAsync -> logError ("Caught async exception: " ++ show eAsync) >> Ex.throwIO eAsync
+            Just eAsync -> logError ("Caught async exception: " ++ show eAsync) >> Control.Monad.Catch.throwM eAsync
 
     logErrors
-      :: Either Control.Monad.Catch.SomeException (Maybe (DeclarationMap ty))
-      -> IO (Maybe (DeclarationMap ty))
+      :: MonadIO m
+      => Either Control.Monad.Catch.SomeException (Maybe a)
+      -> m (Maybe a)
     logErrors = \case
       Left ex -> logError (show ex) >> pure Nothing
       Right res -> pure res
@@ -123,7 +134,10 @@ getPprFun pkg_nm = do
           blahTodo sDocContext' = sDocContext'{sdocSuppressVarKinds = True, sdocPrintExplicitKinds = False, sdocStarIsType = True}
       in renderWithContext (blahTodo sDocContext) doc'
 
-getDefinitions :: (SDoc -> T.Text) -> String -> Ghc (Maybe (DeclarationMap (Either FgError SomeFunction)))
+getDefinitions
+  :: (SDoc -> T.Text)
+  -> String
+  -> Ghc (Maybe (DeclarationMap (FunctionInfo (Either FgError SomeFunction))))
 getDefinitions pprFun pkg_nm = do
   _ <- setDFlags pkg_nm
   unit_state <- hsc_units <$> getSession
@@ -136,34 +150,20 @@ getDefinitions pprFun pkg_nm = do
   liftIO $ IO.hPutStrLn IO.stderr $ "   getDefinitions " ++ pkg_nm
   mDefinitions <- reportUnitDecls pprFun unit_info
   let f :: Map ModuleName FunctionMap
-        -> Map ModuleName (Map Name (Either FgError Doodle.SomeFunction))
-      f = fmap (fmap (fmap eitherToSomeFunction . runExcept))
+        -> Map ModuleName (Map Name (FunctionInfo (Either FgError Doodle.SomeFunction)))
+      f = fmap (fmap (fmap (fmap eitherToSomeFunction . runExcept)))
   pure $ DeclarationMap unit_id . f <$> mDefinitions
-
-ppFunctionMap
-  :: (SDoc -> T.Text)
-  -> FunctionMap
-  -> [T.Text]
-ppFunctionMap pprFun fm = catMaybes $
-   -- WIP: ignore non-forall functions for now
-  Map.toList fm <&> \(name, fun) ->
-    either (const Nothing) (either (const Nothing) (ppTodo name)) (runExcept fun)
-  where
-    ppTodo name !fun = Just $
-      T.unwords
-        [ pprFun (ppr name)
-        , "::"
-        , renderFunctionTypeForallGeneric id renderFgTyConUnqualified fun
-        ]
 
 type FunctionMap =
   Map
     Name
-    (Except
-      FgError
-      (Either
-        (FunctionType (FgType (FgTyCon T.Text)))
-        (FunctionTypeForall T.Text T.Text)
+    (Types.FunctionInfo.FunctionInfo
+      (Except
+        FgError
+        (Either
+          (FunctionType (FgType (FgTyCon T.Text)))
+          (FunctionTypeForall T.Text T.Text)
+        )
       )
     )
 
@@ -201,12 +201,22 @@ reportModuleDecls pprFun unit_id modl_nm = do
         is_exported :: OccName -> Bool
         is_exported occ = occ `elem` exported_occs
 
+    let mkTraceString _id = T.unpack $ T.unwords
+          [ "(" <> pprFun (ppr $ getUnique (varName _id)) <> ")"
+          , "[" <> pprFun (ppr unit_id) <> "]"
+          , pprFun (ppr $ varName _id)
+          , "::"
+          , pprFun (ppr $ varType _id)
+          ]
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ (varName _id, blah)
+            [ mkTraceString _id `trace`
+                ( varName _id
+                , Types.FunctionInfo.mkFunctionInfo (GHC.Types.Unique.getKey $ getUnique $ varName _id) fn
+                )
             | Just thing <- things
             , AnId _id <- [thing]
-            , Just blah <-
+            , Just fn <-
                 let ty = expandTypeSynonyms $ varType _id -- NOTE: we need to expand type synonyms because two types are considered equal only if their 'FgType' representations are equal (==). And a type synonym is a distinct 'TyConApp', which means it'll become a distinct 'FgType'.
                 in [parseType pprFun unit_id (modl_nm, varName _id) ty]
             , case tyThingParent_maybe thing of
@@ -308,15 +318,19 @@ data DeclarationMap ty = DeclarationMap
 
 declarationMapToJson
   :: (SDoc -> T.Text)
-  -> DeclarationMap (Either FgError SomeFunction)
+  -> DeclarationMap (FunctionInfo (Either FgError SomeFunction))
   -> Json.DeclarationMapJson T.Text
 declarationMapToJson pprFun dm =
   let
-    eitherMap :: Map T.Text (Map T.Text (Either FgError SomeFunction))
+    eitherMap :: Map T.Text (Map T.Text (Either (FunctionInfo FgError) (FunctionInfo SomeFunction)))
     eitherMap = mapMap (declarationMap_moduleDeclarations dm) $ \(modName, nameMap) ->
       ( fullyQualify' modName
-      , mapMapMaybe nameMap $ \(name, either') ->
-          (noQualify' name, Just either') -- WIP: no Maybe
+      , mapMapMaybe nameMap $ \(name, functionInfoEither) ->
+          ( noQualify' name
+          , Just $
+              let mkFi fun = functionInfoEither{ Types.FunctionInfo.functionInfo_function = fun }
+              in either (Left . mkFi) (Right . mkFi) (Types.FunctionInfo.functionInfo_function functionInfoEither)
+          ) -- WIP: no Maybe
       )
 
   in Json.DeclarationMapJson

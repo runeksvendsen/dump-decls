@@ -24,6 +24,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Map as Map
 import Types (FgPackage)
 import qualified Types.Doodle as Doodle
+import Types.FunctionInfo (FunctionInfo)
 
 streamPrintJsonList
   :: A.ToJSON a
@@ -40,9 +41,9 @@ streamPrintJsonList jsonList =
     )
 
 data ModuleDeclarations value = ModuleDeclarations
-  { moduleDeclarations_map :: Map value (Map value Doodle.SomeFunction) -- WIP: move somewhere else
+  { moduleDeclarations_map :: Map value (Map value (FunctionInfo Doodle.SomeFunction)) -- WIP: move somewhere else
     -- ^ Map from module name to a map of unqualified function names to 'TypeInfo'
-  , moduleDeclarations_mapFail :: Map value (Map value Doodle.FgError)
+  , moduleDeclarations_mapFail :: Map value (Map value (FunctionInfo Doodle.FgError))
     -- ^ TODO
   } deriving (Eq, Show, Ord, Generic)
 
@@ -52,7 +53,7 @@ instance (NFData a) => NFData (ModuleDeclarations a)
 
 explodeModuleDeclarations
   :: ModuleDeclarations value
-  -> [(value, (value, Doodle.SomeFunction))]
+  -> [(value, (value, FunctionInfo Doodle.SomeFunction))]
 explodeModuleDeclarations =
   concatMap (\(value, lst) -> map (value,) lst)
     . Map.toList
