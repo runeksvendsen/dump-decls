@@ -17,6 +17,7 @@ import Data.Maybe (fromJust)
 import qualified Data.Map as Map
 import qualified Types.Doodle
 import Data.Bifunctor (first)
+import qualified Types.FunctionInfo as FunctionInfo
 
 main :: IO ()
 main = do
@@ -85,7 +86,7 @@ mkSpec pkgName modName defnName expected declarationMapJson =
         mTypeInfo = mDefnMap >>= Map.lookup defnName
         typeInfo = fromJust mTypeInfo
     mTypeInfo `shouldNotBe` Nothing
-    IgnorePackageVersion typeInfo `shouldBe` IgnorePackageVersion (Types.Doodle.SomeFunction_Monomorphic expected)
+    IgnorePackageVersion (FunctionInfo.functionInfo_function typeInfo) `shouldBe` IgnorePackageVersion (Types.Doodle.SomeFunction_Monomorphic expected)
 
 parsePprTyCon :: T.Text -> Types.FgTyCon T.Text
 parsePprTyCon = either error id . Types.parsePprTyCon
