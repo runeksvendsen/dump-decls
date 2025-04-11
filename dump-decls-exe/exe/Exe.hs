@@ -75,12 +75,12 @@ main = do
         pure
 
   let
-    declarationMapToJson' pkg_nm =
+    getDefinitions' pkg_nm =
       declarationMapToJson pprFun <$> getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm
 
     getDefinitionsHandleErrors pkg_nm =
-        reallyCatch (declarationMapToJson' pkg_nm)
-          >>= logErrors
+      reallyCatch (getDefinitions' pkg_nm)
+        >>= logErrors
 
   let stream :: S.Stream (S.Of (Json.DeclarationMapJson T.Text)) Ghc ()
       stream =
