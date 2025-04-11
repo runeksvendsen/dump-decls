@@ -29,12 +29,11 @@ import GHC.Types.Var (varName, varType, VarBndr (Bndr), tyVarKind)
 import Data.Function (on)
 import Data.List (sortBy)
 import System.Environment (getArgs)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified System.Exit as Exit
 import Control.Monad.IO.Class (liftIO, MonadIO)
-import GHC.IO.Unsafe (unsafeInterleaveIO)
 import qualified System.IO as IO
 import Data.Maybe (catMaybes, fromJust, isJust)
 import qualified Control.Exception as Ex
@@ -48,8 +47,6 @@ import qualified Data.Text as T
 import Data.Bifunctor (first)
 import qualified Types.Forall as Forall
 import Data.Either (fromLeft)
-import Data.Functor ((<&>), void)
-import qualified Data.Text.IO as TIO
 import qualified GHC.Driver.Session
 import qualified Types.Doodle as Doodle
 import Control.Monad.Trans.Except (ExceptT, throwE, except, withExceptT, Except, runExcept)
@@ -57,6 +54,7 @@ import Debug.Trace (trace)
 import qualified Types.FunctionInfo
 import Types.FunctionInfo (FunctionInfo)
 import qualified GHC.Types.Unique
+import qualified Streaming.Prelude as S
 
 -- | The output printed to stdout can be parsed as JSON into this data type.
 --
@@ -69,16 +67,28 @@ main = do
   let runGhc' :: FilePath -> Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
       runGhc' libdir action = reallyCatch $ runGhc (Just libdir) action
   (pprFun, ghcLibDir, pkg_names) <- case args of
-    [] -> Exit.die "Missing argument(s): one or more packages"
     ghcLibDir : pkg_names@(first_package_name : _) ->
       runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\pprFun -> pure $ (pprFun, ghcLibDir, pkg_names))
+    _ -> Exit.die "Missing arguments: GHC libdir and one or more packages"
   let throwError = either
         (\err -> logError (show err) >> Control.Exception.throwIO err)
         pure
-  lst <- (throwError =<<) $ runGhc' ghcLibDir $ forM pkg_names $ \pkg_nm -> do
-    reallyCatch (getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm) >>= logErrors
-  let declarationMapJsonList = map (declarationMapToJson (pprFun . pprSuppressVarKinds)) (catMaybes lst)
-  Json.streamPrintJsonList (declarationMapJsonList :: StdoutJsonFormat)
+
+  let
+    declarationMapToJson' pkg_nm =
+      declarationMapToJson pprFun <$> getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm
+
+    getDefinitionsHandleErrors pkg_nm =
+        reallyCatch (declarationMapToJson' pkg_nm)
+          >>= logErrors
+
+  let stream :: S.Stream (S.Of (Json.DeclarationMapJson T.Text)) Ghc ()
+      stream =
+          S.catMaybes
+        $ S.mapM getDefinitionsHandleErrors
+        $ S.each pkg_names
+
+  (throwError =<<) $ runGhc' ghcLibDir $ Json.streamPrintJson stream
   where
     reallyCatch
       :: (MonadIO m, Control.Monad.Catch.MonadCatch m)
@@ -93,11 +103,11 @@ main = do
 
     logErrors
       :: MonadIO m
-      => Either Control.Monad.Catch.SomeException (Maybe a)
+      => Either Control.Monad.Catch.SomeException a
       -> m (Maybe a)
     logErrors = \case
       Left ex -> logError (show ex) >> pure Nothing
-      Right res -> pure res
+      Right res -> pure (Just res)
 
 logError :: MonadIO m => String -> m ()
 logError = liftIO . IO.hPutStrLn IO.stderr
@@ -137,7 +147,7 @@ getPprFun pkg_nm = do
 getDefinitions
   :: (SDoc -> T.Text)
   -> String
-  -> Ghc (Maybe (DeclarationMap (FunctionInfo (Either FgError SomeFunction))))
+  -> Ghc (DeclarationMap (FunctionInfo (Either FgError SomeFunction)))
 getDefinitions pprFun pkg_nm = do
   _ <- setDFlags pkg_nm
   unit_state <- hsc_units <$> getSession
@@ -148,11 +158,11 @@ getDefinitions pprFun pkg_nm = do
     Just unit_info -> return unit_info
     Nothing -> fail "unknown package"
   liftIO $ IO.hPutStrLn IO.stderr $ "   getDefinitions " ++ pkg_nm
-  mDefinitions <- reportUnitDecls pprFun unit_info
+  definitions <- reportUnitDecls pprFun unit_info
   let f :: Map ModuleName FunctionMap
         -> Map ModuleName (Map Name (FunctionInfo (Either FgError Doodle.SomeFunction)))
       f = fmap (fmap (fmap (fmap eitherToSomeFunction . runExcept)))
-  pure $ DeclarationMap unit_id . f <$> mDefinitions
+  pure $ DeclarationMap unit_id (f definitions)
 
 type FunctionMap =
   Map
@@ -167,18 +177,15 @@ type FunctionMap =
       )
     )
 
-reportUnitDecls :: (SDoc -> T.Text) -> UnitInfo -> Ghc (Maybe (Map ModuleName FunctionMap))
+reportUnitDecls :: (SDoc -> T.Text) -> UnitInfo -> Ghc (Map ModuleName FunctionMap)
 reportUnitDecls pprFun unit_info = do
     let exposed :: [ModuleName]
         exposed = map fst (unitExposedModules unit_info)
-    map' <- fmap (Map.fromList . catMaybes) $ forM exposed $ \moduleName' -> do
+    fmap (Map.fromList . catMaybes) $ forM exposed $ \moduleName' -> do
       map' <- reportModuleDecls pprFun (unitId unit_info) moduleName'
       pure $ if null map'
         then Nothing
         else Just (moduleName', map')
-    pure $ if null map'
-      then Nothing
-      else Just map'
 
 reportModuleDecls
   :: (SDoc -> T.Text)

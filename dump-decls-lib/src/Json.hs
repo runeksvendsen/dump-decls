@@ -8,7 +8,7 @@ module Json
 ( ModuleDeclarations(..), explodeModuleDeclarations
 , DeclarationMapJson(..)
   -- * Util
-, streamPrintJsonList
+, streamPrintJson
   -- * Re-exports
 , Map, A.ToJSON
 )
@@ -16,29 +16,26 @@ where
 
 import GHC.Generics (Generic)
 import Data.Map.Strict (Map)
-import Data.List (intersperse)
 import Control.DeepSeq (NFData)
 import qualified Data.Aeson as A
-import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Map as Map
 import Types (FgPackage)
 import qualified Types.Doodle as Doodle
 import Types.FunctionInfo (FunctionInfo)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import qualified Streaming.Prelude as S
 
-streamPrintJsonList
-  :: A.ToJSON a
-  => [a]
-  -> IO ()
-streamPrintJsonList jsonList =
-  Ex.bracket_
-    (putStr "[ ")
-    (putStrLn "]") $
-    (sequence_ $
-      intersperse
-        (BSL.putStr ", ")
-        (map (BSL.putStrLn . A.encode) jsonList)
-    )
+streamPrintJson
+  :: (A.ToJSON a, MonadIO m)
+  => S.Stream (S.Of a) m ()
+  -> m ()
+streamPrintJson stream = do
+  liftIO $ putStr "[ "
+  flip S.mapM_ stream $ \a -> do
+    liftIO $ BSL.putStr ", "
+    liftIO $ BSL.putStrLn $ A.encode a
+  liftIO $ putStrLn "]"
 
 data ModuleDeclarations value = ModuleDeclarations
   { moduleDeclarations_map :: Map value (Map value (FunctionInfo Doodle.SomeFunction)) -- WIP: move somewhere else

@@ -10,7 +10,7 @@ copyright:          (c) 2023 Ben Gamari
 library
     exposed-modules: Exe
     hs-source-dirs: exe
-    build-depends:    base, dump-decls-lib, ghc, containers, text, bytestring, exceptions, ghc-paths, transformers
+    build-depends:    base, dump-decls-lib, ghc, containers, text, bytestring, exceptions, ghc-paths, transformers, streaming
     ghc-options:      -Wall
 
 executable dump-decls
