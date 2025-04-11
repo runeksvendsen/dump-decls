@@ -32,9 +32,10 @@ streamPrintJson
   -> m ()
 streamPrintJson stream = do
   liftIO $ putStr "[ "
-  flip S.mapM_ stream $ \a -> do
-    liftIO $ BSL.putStr ", "
-    liftIO $ BSL.putStrLn $ A.encode a
+  S.mapM_ id
+    $ S.intersperse (liftIO $ BSL.putStr ", ")
+    $ S.map (liftIO . BSL.putStrLn . A.encode)
+    $ stream
   liftIO $ putStrLn "]"
 
 data ModuleDeclarations value = ModuleDeclarations

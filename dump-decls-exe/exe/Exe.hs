@@ -75,12 +75,12 @@ main = do
         pure
 
   let
-    declarationMapToJson' pkg_nm =
+    getDefinitions' pkg_nm =
       declarationMapToJson pprFun <$> getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm
 
     getDefinitionsHandleErrors pkg_nm =
-        reallyCatch (declarationMapToJson' pkg_nm)
-          >>= logErrors
+      reallyCatch (getDefinitions' pkg_nm)
+        >>= logErrors
 
   let stream :: S.Stream (S.Of (Json.DeclarationMapJson T.Text)) Ghc ()
       stream =
@@ -90,17 +90,6 @@ main = do
 
   (throwError =<<) $ runGhc' ghcLibDir $ Json.streamPrintJson stream
   where
-    reallyCatch
-      :: (MonadIO m, Control.Monad.Catch.MonadCatch m)
-      => m a
-      -> m (Either Control.Exception.SomeException a)
-    reallyCatch action =
-      Control.Monad.Catch.catch
-        (action >>= (liftIO . Control.Exception.evaluate) . Right)
-        $ \e -> case Control.Exception.fromException e :: Maybe Ex.AsyncException of
-            Nothing -> pure . Left $ e
-            Just eAsync -> logError ("Caught async exception: " ++ show eAsync) >> Control.Monad.Catch.throwM eAsync
-
     logErrors
       :: MonadIO m
       => Either Control.Monad.Catch.SomeException a
@@ -531,3 +520,25 @@ parsePackageFromUnitId pprFun unitId =
   either (error . ("BUG: parsePackageFromUnitId: " <>)) id (parsePackageWithVersion $ fullyQualify' unitId)
   where
     fullyQualify' = pprFun . fullyQualify
+
+reallyCatch
+  :: (MonadIO m, Control.Monad.Catch.MonadCatch m)
+  => m a
+  -> m (Either Control.Exception.SomeException a)
+reallyCatch action = do
+  eRes <- go (liftIO $ Control.Exception.evaluate action)
+  either
+    (pure . Left)
+    (\action' -> go action')
+    eRes
+  where
+    go
+      :: (MonadIO m, Control.Monad.Catch.MonadCatch m)
+      => m a
+      -> m (Either Control.Exception.SomeException a)
+    go ma =
+      Control.Monad.Catch.catch
+        (Right <$> ma)
+        $ \e -> case Control.Exception.fromException e :: Maybe Ex.AsyncException of
+            Nothing -> pure . Left $ e
+            Just eAsync -> logError ("Caught async exception: " ++ show eAsync) >> Control.Monad.Catch.throwM eAsync
