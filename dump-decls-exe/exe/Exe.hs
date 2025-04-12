@@ -64,7 +64,7 @@ main :: IO ()
 main = do
   args <- getArgs
   let runGhc' :: FilePath -> Ghc a -> IO (Either Control.Monad.Catch.SomeException a)
-      runGhc' libdir action = reallyCatch $ runGhc (Just libdir) action
+      runGhc' libdir action = reallyCatchIO $ runGhc (Just libdir) action
   (pprFun, ghcLibDir, pkg_names) <- case args of
     ghcLibDir : pkg_names@(first_package_name : _) ->
       runGhc' ghcLibDir (getPprFun first_package_name) >>= either (fail . show) (\pprFun -> pure $ (pprFun, ghcLibDir, pkg_names))
@@ -109,6 +109,14 @@ main = do
         $ \e -> case Control.Exception.fromException e :: Maybe Ex.AsyncException of
             Nothing -> pure . Left $ e
             Just eAsync -> logError ("Caught async exception: " ++ show eAsync) >> Control.Monad.Catch.throwM eAsync
+
+    reallyCatchIO :: IO a -> IO (Either Control.Exception.SomeException a)
+    reallyCatchIO ioAction =
+      Control.Exception.catch
+        (Right <$> (ioAction >>= Control.Exception.evaluate))
+        $ \e -> case Control.Exception.fromException e :: Maybe Ex.AsyncException of
+            Nothing -> pure . Left $ e
+            Just eAsync -> logError ("Caught async exception: " ++ show eAsync) >> Ex.throwIO eAsync
 
     logErrors
       :: MonadIO m
