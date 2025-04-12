@@ -50,7 +50,6 @@ import Data.Either (fromLeft)
 import qualified GHC.Driver.Session
 import qualified Types.Doodle as Doodle
 import Control.Monad.Trans.Except (ExceptT, throwE, except, withExceptT, Except, runExcept)
-import Debug.Trace (trace)
 import qualified Types.FunctionInfo
 import Types.FunctionInfo (FunctionInfo)
 import qualified GHC.Types.Unique
@@ -223,19 +222,11 @@ reportModuleDecls pprFun unit_id modl_nm = do
         is_exported :: OccName -> Bool
         is_exported occ = occ `elem` exported_occs
 
-    let mkTraceString _id = T.unpack $ T.unwords
-          [ "(" <> pprFun (ppr $ getUnique (varName _id)) <> ")"
-          , "[" <> pprFun (ppr unit_id) <> "]"
-          , pprFun (ppr $ varName _id)
-          , "::"
-          , pprFun (ppr $ varType _id)
-          ]
     things <- mapM GHC.lookupName sorted_names
     let contents =
-            [ mkTraceString _id `trace`
-                ( varName _id
-                , Types.FunctionInfo.mkFunctionInfo (GHC.Types.Unique.getKey $ getUnique $ varName _id) fn
-                )
+            [ ( varName _id
+              , Types.FunctionInfo.mkFunctionInfo (GHC.Types.Unique.getKey $ getUnique $ varName _id) fn
+              )
             | Just thing <- things
             , AnId _id <- [thing]
             , Just fn <-
