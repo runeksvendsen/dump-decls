@@ -78,9 +78,19 @@ main = do
     getDefinitions' pkg_nm =
       declarationMapToJson pprFun <$> getDefinitions (pprFun . pprSuppressVarKinds) pkg_nm
 
-    getDefinitionsHandleErrors pkg_nm =
-      reallyCatch (getDefinitions' pkg_nm)
-        >>= logErrors
+    getDefinitionsHandleErrors pkg_nm = do
+      -- NOTE: This is a workaround for being unable to catch the exception:
+      --        'Cannot continue after interface file error' in the Ghc monad.
+      --       We can catch this exeption in IO, so we just 'runGhc' the action (to get an IO action),
+      --        and attempt to catch it here. Then, if the IO action didn't throw an exception,
+      --       just return the Ghc action.
+      --       Suck needing to run it twice, but that's the only workaround I know so far.
+      let action = getDefinitions' pkg_nm
+      eRes <- liftIO $ runGhc' ghcLibDir action
+      eRes' <- case eRes of
+        Left e -> pure $ Left e
+        Right _ -> reallyCatch action
+      logErrors eRes'
 
   let stream :: S.Stream (S.Of (Json.DeclarationMapJson T.Text)) Ghc ()
       stream =
@@ -144,9 +154,14 @@ getPprFun pkg_nm = do
           blahTodo sDocContext' = sDocContext'{sdocSuppressVarKinds = True, sdocPrintExplicitKinds = False, sdocStarIsType = True}
       in renderWithContext (blahTodo sDocContext) doc'
 
+-- NOTE: In order to populate 'functionInfo_unique' with consistent uniques
+--       (so that the same function re-exported from two different packages have the same unique),
+--       you must _not_ 'runIO' this function individually for each package.
+--       Ie. you should do e.g. @runGhc $ mapM (getDefinitions f) listOfPkgNames@ and not
+--       @mapM (runGhc . getDefinitions f) listOfPkgNames@.
 getDefinitions
   :: (SDoc -> T.Text)
-  -> String
+  -> String -- ^ package name
   -> Ghc (DeclarationMap (FunctionInfo (Either FgError SomeFunction)))
 getDefinitions pprFun pkg_nm = do
   _ <- setDFlags pkg_nm
